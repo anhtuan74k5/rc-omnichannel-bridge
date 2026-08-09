@@ -147,9 +147,12 @@ Server log rõ từng bước để dễ debug khi demo:
 Khi bật AI, tin nhắn của khách sẽ được AI xử lý trước khi chuyển cho agent:
 
 - **AI trả lời được** (câu hỏi đơn giản: giờ mở cửa, giá, FAQ, chào hỏi...) →
-  AI tự trả lời ngay trên Facebook/Telegram, **không tạo room** trên Omnichannel.
+  AI tự trả lời ngay trên Facebook/Telegram, **đồng thời** tin nhắn của khách
+  và câu trả lời của AI đều được ghi vào room trên Omnichannel (tiền tố `🤖 AI:`)
+  để agent thấy toàn bộ hội thoại AI.
 - **AI không xử lý được** (khiếu nại, hoàn tiền, kỹ thuật phức tạp, khách yêu cầu
   gặp người...) → chuyển sang agent người thật (tạo visitor + room như bình thường).
+
 
 **Cấu hình trong `.env`:**
 ```
@@ -176,11 +179,13 @@ AI_MODEL=deepseek-chat               # hoặc deepseek-reasoner (R1)
 **Luồng hoạt động khi bật AI:**
 ```
 khách gửi tin → webhook → forwardToRocketChat()
-   ├─ AI_ENABLED? ── không → tạo room cho agent (như cũ)
+   ├─ AI_ENABLED? ── không → tạo room, gửi tin cho agent (như cũ)
    └─ có → gọi AI
-        ├─ AI trả lời được → gửi câu trả lời thẳng về FB/TG (không tạo room)
-        └─ AI không trả lời được → tạo room cho agent
+        ├─ AI trả lời được → tạo room, ghi tin khách + "🤖 AI: <trả lời>" vào room,
+        │                    rồi gửi câu trả lời về FB/TG (agent thấy hội thoại AI)
+        └─ AI không trả lời được → tạo room, gửi tin cho agent
 ```
+
 
 ## Xử lý lỗi
 

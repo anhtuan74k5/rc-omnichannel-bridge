@@ -49,20 +49,23 @@ async function sendReplyToPlatform(platform, platformUserId, text) {
  * exist on Rocket.Chat, then send the message into the room.
  *
  * AI integration: before routing to a human agent, ask the AI if it can
- * handle the message automatically. If yes, reply directly to the customer
- * and do NOT create a room. If no (or AI disabled), hand off to the agent.
+ * handle the message automatically. If yes, the AI reply is sent to the
+ * customer AND logged into the Rocket.Chat room (so the agent sees the full
+ * AI conversation in Omnichannel). If no (or AI disabled), hand off to agent.
  */
 async function forwardToRocketChat(platform, platformUserId, name, text) {
+
   // 0. Try AI auto-reply first (if enabled).
+  let aiReply = null;
   if (ai.isEnabled()) {
     try {
       const decision = await ai.askAI(text);
       if (decision.handled && decision.reply) {
-        console.log(`[ai] AI auto-replied to ${platform}:${platformUserId}: "${decision.reply}"`);
-        await sendReplyToPlatform(platform, platformUserId, decision.reply);
-        return; // AI handled it, no room needed.
+        aiReply = decision.reply;
+        console.log(`[ai] AI auto-replied to ${platform}:${platformUserId}: "${aiReply}"`);
+      } else {
+        console.log(`[ai] AI cannot handle, handing off to agent for ${platform}:${platformUserId}.`);
       }
-      console.log(`[ai] AI cannot handle, handing off to agent for ${platform}:${platformUserId}.`);
     } catch (err) {
       console.error('[ai] AI call failed, falling back to agent:', err.message);
     }
@@ -81,7 +84,16 @@ async function forwardToRocketChat(platform, platformUserId, name, text) {
 
   // 4. Send the visitor message into the room.
   await rocketchat.sendMessageToRocketChat(visitorToken, roomId, text);
+
+  // 5. If AI handled it, also send the AI reply into the room so the agent
+  //    can see the full AI conversation in Omnichannel, AND send it to the
+  //    customer on the platform.
+  if (aiReply) {
+    await rocketchat.sendMessageToRocketChat(visitorToken, roomId, `🤖 AI: ${aiReply}`);
+    await sendReplyToPlatform(platform, platformUserId, aiReply);
+  }
 }
+
 
 
 // ============================================================
