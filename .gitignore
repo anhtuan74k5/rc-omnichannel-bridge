@@ -1,0 +1,4 @@
+node_modules/
+.env
+mapping.json
+npm-debug.log*
