@@ -20,6 +20,8 @@ const mapping = require('./mapping');
 const rocketchat = require('./rocketchat');
 const facebook = require('./facebook');
 const telegram = require('./telegram');
+const ai = require('./ai');
+
 
 const PORT = process.env.PORT || 3000;
 const POLL_INTERVAL_MS = 3000;
@@ -32,10 +34,40 @@ app.use(express.json());
 // ============================================================
 
 /**
+ * Send a reply back to the correct platform (Facebook or Telegram).
+ */
+async function sendReplyToPlatform(platform, platformUserId, text) {
+  if (platform === 'facebook') {
+    await facebook.sendMessage(platformUserId, text);
+  } else if (platform === 'telegram') {
+    await telegram.sendMessage(platformUserId, text);
+  }
+}
+
+/**
  * Given a platform user id, name and platform, ensure the visitor + room
  * exist on Rocket.Chat, then send the message into the room.
+ *
+ * AI integration: before routing to a human agent, ask the AI if it can
+ * handle the message automatically. If yes, reply directly to the customer
+ * and do NOT create a room. If no (or AI disabled), hand off to the agent.
  */
 async function forwardToRocketChat(platform, platformUserId, name, text) {
+  // 0. Try AI auto-reply first (if enabled).
+  if (ai.isEnabled()) {
+    try {
+      const decision = await ai.askAI(text);
+      if (decision.handled && decision.reply) {
+        console.log(`[ai] AI auto-replied to ${platform}:${platformUserId}: "${decision.reply}"`);
+        await sendReplyToPlatform(platform, platformUserId, decision.reply);
+        return; // AI handled it, no room needed.
+      }
+      console.log(`[ai] AI cannot handle, handing off to agent for ${platform}:${platformUserId}.`);
+    } catch (err) {
+      console.error('[ai] AI call failed, falling back to agent:', err.message);
+    }
+  }
+
   // 1. Get or create the mapping entry (persisted in mapping.json).
   const entry = mapping.getOrCreate(platform, platformUserId);
 
@@ -50,6 +82,7 @@ async function forwardToRocketChat(platform, platformUserId, name, text) {
   // 4. Send the visitor message into the room.
   await rocketchat.sendMessageToRocketChat(visitorToken, roomId, text);
 }
+
 
 // ============================================================
 // Facebook webhook routes
@@ -167,6 +200,8 @@ async function start() {
   // Start the polling loop.
   setInterval(pollAgentMessages, POLL_INTERVAL_MS);
   console.log(`[startup] Polling loop started (every ${POLL_INTERVAL_MS / 1000}s).`);
+  console.log(`[startup] AI bot: ${ai.isEnabled() ? 'ENABLED' : 'disabled'}`);
+
 
   app.listen(PORT, () => {
     console.log(`[startup] Bridge server listening on port ${PORT}`);

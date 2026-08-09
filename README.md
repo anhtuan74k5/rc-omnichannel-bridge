@@ -142,7 +142,39 @@ Server log rõ từng bước để dễ debug khi demo:
 - `[poll] New agent message in room ... -> facebook:...` — polling phát hiện tin agent
 - `[facebook] Sending message to PSID ...` / `[telegram] Sending message to chat ...` — gửi ra ngoài
 
+## Bot AI tự động (optional)
+
+Khi bật AI, tin nhắn của khách sẽ được AI xử lý trước khi chuyển cho agent:
+
+- **AI trả lời được** (câu hỏi đơn giản: giờ mở cửa, giá, FAQ, chào hỏi...) →
+  AI tự trả lời ngay trên Facebook/Telegram, **không tạo room** trên Omnichannel.
+- **AI không xử lý được** (khiếu nại, hoàn tiền, kỹ thuật phức tạp, khách yêu cầu
+  gặp người...) → chuyển sang agent người thật (tạo visitor + room như bình thường).
+
+**Cấu hình trong `.env`:**
+```
+AI_ENABLED=true
+AI_API_KEY=sk-...            # key của OpenAI (hoặc API tương thích)
+AI_BASE_URL=https://api.openai.com/v1   # mặc định OpenAI, có thể đổi
+AI_MODEL=gpt-4o-mini
+```
+
+> 💡 Module `ai.js` dùng **OpenAI-compatible Chat Completions API**, nên có thể
+> trỏ tới bất kỳ endpoint tương thích nào (OpenAI, Azure, Groq, LLM local...).
+> Nếu `AI_ENABLED=false` hoặc thiếu `AI_API_KEY`, hệ thống hoạt động như cũ
+> (chuyển thẳng cho agent).
+
+**Luồng hoạt động khi bật AI:**
+```
+khách gửi tin → webhook → forwardToRocketChat()
+   ├─ AI_ENABLED? ── không → tạo room cho agent (như cũ)
+   └─ có → gọi AI
+        ├─ AI trả lời được → gửi câu trả lời thẳng về FB/TG (không tạo room)
+        └─ AI không trả lời được → tạo room cho agent
+```
+
 ## Xử lý lỗi
+
 
 - **401 (token hết hạn)**: tự động re-login agent và retry 1 lần.
 - **Lỗi gọi Rocket.Chat**: log rõ status + body để debug.
