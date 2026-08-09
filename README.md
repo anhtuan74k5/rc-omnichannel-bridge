@@ -164,6 +164,15 @@ AI_MODEL=gpt-4o-mini
 > Nếu `AI_ENABLED=false` hoặc thiếu `AI_API_KEY`, hệ thống hoạt động như cũ
 > (chuyển thẳng cho agent).
 
+**Ví dụ dùng DeepSeek** (rẻ, tương thích OpenAI):
+```
+AI_ENABLED=true
+AI_API_KEY=sk-...                    # key từ platform.deepseek.com
+AI_BASE_URL=https://api.deepseek.com
+AI_MODEL=deepseek-chat               # hoặc deepseek-reasoner (R1)
+```
+
+
 **Luồng hoạt động khi bật AI:**
 ```
 khách gửi tin → webhook → forwardToRocketChat()
