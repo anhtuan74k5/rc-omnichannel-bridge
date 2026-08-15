@@ -1,8 +1,10 @@
-# Rocket.Chat Messenger + Telegram Bridge
+# rc-omnichannel-bridge
 
-Bridge server (Node.js + Express) tích hợp **Facebook Messenger** và **Telegram**
-vào **Rocket.Chat Omnichannel** — giao tiếp trực tiếp qua REST API namespace
+Bridge server (Node.js + Express) tích hợp **nhiều nền tảng nhắn tin** (hiện tại:
+**Facebook Messenger** và **Telegram**, tương lai có thể thêm Zalo/WhatsApp) vào
+**Rocket.Chat Omnichannel** — giao tiếp trực tiếp qua REST API namespace
 `/api/v1/livechat/*`, **không dùng** Marketplace app có sẵn của Rocket.Chat.
+
 
 > ⚠️ Chỉ gọi các route `/api/v1/livechat/*`. Mọi route khác (như `/users.create`,
 > `/channels.list`) bị proxy chặn (404) nên code **không bao giờ** gọi chúng.
