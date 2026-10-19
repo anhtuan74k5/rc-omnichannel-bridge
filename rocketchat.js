@@ -5,8 +5,9 @@
  * namespace only. No other Rocket.Chat routes are called (they are blocked by
  * the proxy and return 404).
  *
- * IMPORTANT: We use the agent's X-Auth-Token / X-User-Id obtained from
- * /api/v1/login. The livechat visitor endpoints accept these headers.
+ * IMPORTANT: We use the agent's X-Auth-Token / X-User-Id. They can come from
+ * Personal Access Token env vars, or from /api/v1/login with agent credentials.
+ * The livechat visitor endpoints accept these headers.
  */
 
 const mapping = require('./mapping');
@@ -14,6 +15,8 @@ const mapping = require('./mapping');
 const ROCKETCHAT_URL = (process.env.ROCKETCHAT_URL || '').replace(/\/+$/, '');
 const AGENT_USERNAME = process.env.ROCKETCHAT_AGENT_USERNAME || '';
 const AGENT_PASSWORD = process.env.ROCKETCHAT_AGENT_PASSWORD || '';
+const AUTH_TOKEN = process.env.ROCKETCHAT_AUTH_TOKEN || '';
+const USER_ID = process.env.ROCKETCHAT_USER_ID || '';
 const DEPARTMENT_ID = process.env.ROCKETCHAT_DEPARTMENT_ID || '';
 
 
@@ -35,7 +38,10 @@ async function rcFetch(path, options = {}, retried = false) {
   };
 
   const url = `${ROCKETCHAT_URL}${path}`;
-  console.log(`[rocketchat] ${options.method || 'GET'} ${path}`);
+  const isPollingHistory = path.includes('/api/v1/livechat/messages.history/');
+  if (!isPollingHistory || process.env.DEBUG_POLLING === 'true') {
+    console.log(`[rocketchat] ${options.method || 'GET'} ${path}`);
+  }
 
   const res = await fetch(url, { ...options, headers });
 
@@ -67,10 +73,18 @@ async function rcFetch(path, options = {}, retried = false) {
 /**
  * loginAgent()
  * ------------
- * POST /api/v1/login with agent credentials. Caches the session and
- * automatically re-logins when the token expires.
+ * Returns a Rocket.Chat auth session. Prefer Personal Access Token env vars
+ * when present; otherwise POST /api/v1/login with agent credentials.
  */
 async function loginAgent() {
+  if (AUTH_TOKEN && USER_ID) {
+    return {
+      authToken: AUTH_TOKEN,
+      userId: USER_ID,
+      expiresAt: Number.MAX_SAFE_INTEGER,
+    };
+  }
+
   if (agentSession && agentSession.expiresAt > Date.now()) {
     return agentSession;
   }
@@ -193,6 +207,44 @@ async function sendMessageToRocketChat(visitorToken, roomId, text) {
   return body;
 }
 
+async function uploadLivechatFile(visitorToken, roomId, { filename, buffer, mimeType, description }) {
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+    throw new Error('buffer must be a non-empty Buffer');
+  }
+
+  const form = new FormData();
+  const file = new Blob([buffer], { type: mimeType || 'application/octet-stream' });
+  form.append('file', file, filename || 'document');
+  if (description) {
+    form.append('description', description);
+  }
+
+  const url = `${ROCKETCHAT_URL}/api/v1/livechat/upload/${encodeURIComponent(roomId)}`;
+  console.log(`[rocketchat] Uploading visitor file to room ${roomId}: "${filename}"`);
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'x-visitor-token': visitorToken,
+    },
+    body: form,
+  });
+
+  let body = null;
+  const text = await res.text();
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    body = text;
+  }
+
+  if (!res.ok || !body || body.success === false) {
+    throw new Error(`Rocket.Chat livechat upload failed (${res.status}): ${text}`);
+  }
+
+  console.log('[rocketchat] Visitor file uploaded successfully.');
+  return body;
+}
+
 /**
  * pollNewAgentMessages(roomId, visitorToken, lastMessageTimestamp)
  * ----------------------------------------------------------------
@@ -228,6 +280,7 @@ module.exports = {
   loginAgent,
   getOrCreateVisitor,
   getOrCreateRoom,
+  uploadLivechatFile,
   sendMessageToRocketChat,
   pollNewAgentMessages,
 };

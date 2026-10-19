@@ -34,6 +34,7 @@ Rocket.Chat agent reply ──► polling (3s) ──► Facebook Graph API / Te
 ├── rocketchat.js     # tích hợp Rocket.Chat livechat API
 ├── facebook.js       # webhook + gửi tin Facebook Messenger
 ├── telegram.js       # webhook + gửi tin Telegram
+├── documents.js      # lưu/index tài liệu riêng theo từng user để AI trả lời
 ├── mapping.js        # lưu mapping (visitor token, room, platform) vào mapping.json
 └── mapping.json      # (tự tạo) dữ liệu mapping persist qua restart
 ```
@@ -153,7 +154,8 @@ Khi bật AI, tin nhắn của khách sẽ được AI xử lý trước khi chu
   và câu trả lời của AI đều được ghi vào room trên Omnichannel (tiền tố `🤖 AI:`)
   để agent thấy toàn bộ hội thoại AI.
 - **AI không xử lý được** (khiếu nại, hoàn tiền, kỹ thuật phức tạp, khách yêu cầu
-  gặp người...) → chuyển sang agent người thật (tạo visitor + room như bình thường).
+  gặp người...) → gửi một câu báo đã chuyển cho nhân viên hỗ trợ, rồi chuyển sang
+  agent người thật (tạo visitor + room như bình thường).
 
 
 **Cấu hình trong `.env`:**
@@ -162,12 +164,17 @@ AI_ENABLED=true
 AI_API_KEY=sk-...            # key của OpenAI (hoặc API tương thích)
 AI_BASE_URL=https://api.openai.com/v1   # mặc định OpenAI, có thể đổi
 AI_MODEL=gpt-4o-mini
+AI_BUSINESS_CONTEXT=Tên doanh nghiệp: ...; Sản phẩm/dịch vụ: ...; Giờ làm việc: ...; Email hỗ trợ: ...
+AI_HANDOFF_MESSAGE=Mình chưa có đủ thông tin để trả lời chính xác câu hỏi này. Mình đã chuyển nội dung cho nhân viên hỗ trợ, bạn vui lòng chờ trong giây lát nhé.
 ```
 
 > 💡 Module `ai.js` dùng **OpenAI-compatible Chat Completions API**, nên có thể
 > trỏ tới bất kỳ endpoint tương thích nào (OpenAI, Azure, Groq, LLM local...).
 > Nếu `AI_ENABLED=false` hoặc thiếu `AI_API_KEY`, hệ thống hoạt động như cũ
 > (chuyển thẳng cho agent).
+> Bot chỉ được trả lời thông tin doanh nghiệp có trong `AI_BUSINESS_CONTEXT`
+> hoặc tài liệu user upload; nếu không có, nó sẽ hỏi lại hoặc chuyển agent,
+> không tự bịa giờ mở cửa/sản phẩm/giá.
 
 **Ví dụ dùng DeepSeek** (rẻ, tương thích OpenAI):
 ```
@@ -185,8 +192,82 @@ khách gửi tin → webhook → forwardToRocketChat()
    └─ có → gọi AI
         ├─ AI trả lời được → tạo room, ghi tin khách + "🤖 AI: <trả lời>" vào room,
         │                    rồi gửi câu trả lời về FB/TG (agent thấy hội thoại AI)
-        └─ AI không trả lời được → tạo room, gửi tin cho agent
+        └─ AI không trả lời được → tạo room, báo khách chờ agent, gửi tin cho agent
 ```
+
+## Hỏi đáp theo tài liệu upload (MVP)
+
+Bridge hỗ trợ upload tài liệu text/markdown bằng API JSON. Tài liệu được lưu
+local trong `data/documents/` và tách riêng theo từng user bằng cặp:
+
+```text
+platform + platformUserId
+```
+
+Ví dụ Telegram chat id `222333444` sẽ dùng folder:
+
+```text
+data/documents/telegram_222333444/
+```
+
+Upload tài liệu cho user:
+
+```bash
+curl -X POST "http://localhost:3000/documents/upload" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "platform": "telegram",
+    "platformUserId": "222333444",
+    "filename": "faq.md",
+    "content": "Giờ làm việc: 8:00-17:00 từ thứ Hai đến thứ Sáu.\nEmail hỗ trợ: support@example.com"
+  }'
+```
+
+Xem danh sách tài liệu của user:
+
+```bash
+curl "http://localhost:3000/documents?platform=telegram&platformUserId=222333444"
+```
+
+Khi user đó hỏi qua webhook Telegram/Facebook, AI sẽ chỉ tìm tài liệu thuộc
+đúng `platformUserId` đó. Nếu tài liệu của user có thông tin liên quan, AI trả
+lời dựa trên tài liệu. Nếu không có thông tin liên quan, AI không bịa và chuyển
+cho agent.
+
+### Upload tài liệu trực tiếp qua Telegram
+
+Khi đã điền `TELEGRAM_BOT_TOKEN`, có thể bật polling để test local mà không cần
+ngrok:
+
+```env
+TELEGRAM_POLLING=true
+```
+
+Sau đó chạy `npm start`, mở bot Telegram và gửi file text-based trực tiếp vào
+bot. Bridge sẽ tải file, lưu vào:
+
+```text
+data/documents/telegram_<chat_id>/
+```
+
+và trả lời lại trên Telegram khi index xong.
+
+Các loại file hiện hỗ trợ khi gửi trực tiếp qua Telegram:
+
+```text
+.txt, .md, .csv, .tsv, .json, .jsonl, .html, .htm, .xml,
+.yaml, .yml, .log, .ini, .conf, .env, .pdf, .docx
+```
+
+Giới hạn upload của bridge mặc định là `100MB` qua:
+
+```env
+TELEGRAM_MAX_DOCUMENT_BYTES=104857600
+REQUEST_BODY_LIMIT=100mb
+```
+
+Với `.pdf` và `.docx`, bridge sẽ trích xuất text rồi mới index. File `.doc`
+cũ và `.xlsx` chưa hỗ trợ trong MVP này.
 
 
 ## Xử lý lỗi

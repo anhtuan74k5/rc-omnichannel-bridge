@@ -1,4 +1,6 @@
 node_modules/
 .env
 mapping.json
+handoff-rc-omnichannel-bridge.md
+data/
 npm-debug.log*

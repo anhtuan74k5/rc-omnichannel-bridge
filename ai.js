@@ -15,38 +15,188 @@
  *   AI_MODEL=gpt-4o-mini                    (optional, default gpt-4o-mini)
  */
 
+const documents = require('./documents');
+const liveLookup = require('./liveLookup');
+
 const AI_ENABLED = process.env.AI_ENABLED === 'true';
 const AI_API_KEY = process.env.AI_API_KEY || '';
 const AI_BASE_URL = (process.env.AI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '');
 const AI_MODEL = process.env.AI_MODEL || 'gpt-4o-mini';
+const AI_BUSINESS_CONTEXT = (process.env.AI_BUSINESS_CONTEXT || '').trim();
 
 // System prompt instructing the AI when to auto-reply vs hand off to human.
 const SYSTEM_PROMPT = `You are an AI customer-support assistant for a business.
-You receive a customer message. Decide whether you can fully resolve it yourself.
+Your job is to resolve common customer questions, collect useful context, and
+route to a human only when automation is not appropriate.
 
 Rules:
-- If the message is a simple question (hours, prices, FAQ, greetings, thanks,
-  basic info) -> answer it directly and concisely in the customer's language.
-- If the message requires human judgment, account access, complaints, refunds,
-  complex technical issues, or the customer explicitly asks for a human ->
-  do NOT answer; signal handoff.
+- Reply in the same language as the customer.
+- Keep replies concise, friendly, and practical.
+- Answer greetings, thanks, simple arithmetic, and low-risk general questions
+  directly when you are confident.
+- Answer simple stable general-knowledge questions, definitions, translations,
+  short writing help, and basic reasoning questions when you are confident.
+- Answer business-specific facts such as products, opening hours, prices,
+  policies, addresses, promotions, and contact details only if they are present
+  in the provided business context, document excerpts, or customer message.
+- Never invent business details and never output placeholder text.
+- For unclear support requests, ask one specific clarifying question instead of
+  handing off immediately.
+- For harmless off-topic small talk, answer briefly. For broad off-topic tasks,
+  gently redirect toward product/service support.
+- Do not claim access to live/current data, private account data, order data, or
+  internal systems unless it is provided in the message. You may use the
+  provided current date/time context for date/time questions, but not for live
+  news, weather, politics, market prices, or external facts that can change.
+- For current or fast-changing external facts, say you do not have live lookup
+  access and suggest checking an official/current source. Do not hand off unless
+  it is related to the business support case.
+- Signal handoff only when the customer asks for a human, or the request needs
+  human judgment/action such as billing disputes, refunds, complaints, account
+  access, security incidents, legal/medical/financial advice, or complex
+  troubleshooting.
 
 Respond ONLY with a JSON object, no other text:
 {"handled": true, "reply": "your answer here"}
 or
 {"handled": false}`;
 
+const DOCUMENT_SYSTEM_PROMPT = `You are an AI customer-support assistant for a business.
+The customer has uploaded private documents. Use the provided document excerpts
+when they are relevant to the customer's question.
+
+Rules:
+- Reply in the same language as the customer.
+- If the answer is clearly supported by the excerpts, answer directly and
+  concisely.
+- Never invent business details and never output placeholder text.
+- If the customer appears to be asking about the document but the excerpts are
+  not enough, ask one specific clarifying question if that can recover the
+  conversation.
+- If the document question still cannot be answered safely, signal handoff.
+- For greetings, thanks, simple arithmetic, and clearly off-topic questions, use
+  the normal support behavior: answer simple stable questions or redirect
+  politely instead of pretending the document contains the answer.
+- For current or fast-changing external facts, say you do not have live lookup
+  access and suggest checking an official/current source.
+- Never mention internal chunk ids.
+
+Respond ONLY with a JSON object, no other text:
+{"handled": true, "reply": "your answer here"}
+or
+{"handled": false}`;
+
+function buildDocumentContext(chunks) {
+  return chunks
+    .map((chunk, index) => {
+      return `Excerpt ${index + 1} from ${chunk.filename}:\n${chunk.text}`;
+    })
+    .join('\n\n---\n\n');
+}
+
+function buildRuntimeContext() {
+  const now = new Date();
+  const timezone = process.env.TZ || 'Asia/Bangkok';
+  const currentDateTime = new Intl.DateTimeFormat('vi-VN', {
+    timeZone: timezone,
+    dateStyle: 'full',
+    timeStyle: 'short',
+  }).format(now);
+
+  const lines = [
+    `Current server date/time: ${currentDateTime}`,
+    `Timezone: ${timezone}`,
+  ];
+
+  if (AI_BUSINESS_CONTEXT) {
+    lines.push(`Business context:\n${AI_BUSINESS_CONTEXT}`);
+  } else {
+    lines.push('Business context: not configured. Do not invent products, hours, prices, policies, address, or contact details.');
+  }
+
+  return lines.join('\n');
+}
+
+function getStaticReply(customerMessage) {
+  const text = String(customerMessage || '').trim().toLowerCase();
+  if (text === '/start' || text === 'start') {
+    return 'Xin chào! Mình có thể trả lời câu hỏi đơn giản, tra thời tiết, xem một số thông tin hiện hành, đọc tài liệu PDF/DOCX/text bạn gửi, hoặc chuyển cho nhân viên hỗ trợ khi cần.';
+  }
+
+  if (text === '/help' || text === 'help') {
+    return [
+      'Bạn có thể nhắn câu hỏi trực tiếp, ví dụ:',
+      '- Thời tiết Hà Nội hôm nay thế nào?',
+      '- Tổng thống hiện tại của Mỹ là ai?',
+      '- Tóm tắt file tôi vừa gửi',
+      '- Cho tôi gặp nhân viên hỗ trợ',
+      'Bot hiện đọc được tin nhắn văn bản và tài liệu PDF/DOCX/text.',
+    ].join('\n');
+  }
+
+  return '';
+}
+
 /**
  * Ask the AI whether it can handle the message.
  * Returns { handled: boolean, reply?: string }.
  */
-async function askAI(customerMessage) {
+async function askAI(customerMessage, context = {}) {
+  const staticReply = getStaticReply(customerMessage);
+  if (staticReply) {
+    return { handled: true, reply: staticReply };
+  }
+
   if (!AI_ENABLED) {
     return { handled: false };
   }
   if (!AI_API_KEY) {
     console.warn('[ai] AI_ENABLED=true but AI_API_KEY is missing. Skipping AI.');
     return { handled: false };
+  }
+
+  let messages = [
+    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: buildRuntimeContext() },
+    { role: 'user', content: customerMessage },
+  ];
+  const liveContext = await liveLookup.getLiveContext(customerMessage);
+  if (liveContext && liveContext.directReply) {
+    console.log('[ai] Live lookup returned a direct reply.');
+    return { handled: true, reply: liveContext.directReply };
+  }
+  if (liveContext && liveContext.context) {
+    console.log('[ai] Live lookup context available.');
+    messages.splice(2, 0, {
+      role: 'system',
+      content: `Live lookup result. Use this for the answer and mention the source briefly if useful:\n${liveContext.context}`,
+    });
+  }
+
+  if (!liveContext && context.platform && context.platformUserId) {
+    const retrieval = documents.retrieveRelevantChunks(
+      context.platform,
+      context.platformUserId,
+      customerMessage
+    );
+
+    if (retrieval.hasDocuments) {
+      if (retrieval.chunks.length === 0) {
+        console.log(`[ai] Documents exist but no relevant context for ${context.platform}:${context.platformUserId}.`);
+      } else {
+        console.log(
+          `[ai] Using ${retrieval.chunks.length} document chunk(s) for ${context.platform}:${context.platformUserId}.`
+        );
+        messages = [
+          { role: 'system', content: DOCUMENT_SYSTEM_PROMPT },
+          { role: 'system', content: buildRuntimeContext() },
+          {
+            role: 'user',
+            content: `Document excerpts:\n${buildDocumentContext(retrieval.chunks)}\n\nCustomer question:\n${customerMessage}`,
+          },
+        ];
+      }
+    }
   }
 
   console.log(`[ai] Asking AI to handle: "${customerMessage}"`);
@@ -58,10 +208,7 @@ async function askAI(customerMessage) {
     },
     body: JSON.stringify({
       model: AI_MODEL,
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: customerMessage },
-      ],
+      messages,
       temperature: 0.3,
     }),
   });
