@@ -58,7 +58,7 @@ function getUserKey(platform, platformUserId) {
   const safePlatform = normalizeId(platform).toLowerCase();
   const safeUserId = normalizeId(platformUserId);
   if (!safePlatform || !safeUserId) {
-    throw new Error('platform and platformUserId are required');
+    throw new Error(ERRORS.documents.requiredIdentity);
   }
   return `${safePlatform}_${safeUserId}`;
 }
@@ -300,13 +300,13 @@ async function extractTextFromBuffer(filename, buffer) {
 
 async function uploadDocumentBuffer({ platform, platformUserId, filename, buffer }) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
-    throw new Error('buffer must be a non-empty Buffer');
+    throw new Error(ERRORS.documents.invalidBuffer);
   }
 
   const safeFilename = sanitizeFilename(filename);
   const content = normalizeText(await extractTextFromBuffer(safeFilename, buffer));
   if (!content) {
-    throw new Error(`Could not extract readable text from "${safeFilename}".`);
+    throw new Error(ERRORS.documents.unreadableContent(safeFilename));
   }
 
   const originalDir = getOriginalDir(platform, platformUserId);

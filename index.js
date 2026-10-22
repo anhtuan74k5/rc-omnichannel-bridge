@@ -22,12 +22,12 @@ const facebook = require('./facebook');
 const telegram = require('./telegram');
 const ai = require('./ai');
 const documents = require('./documents');
-const { CHANNELS, ENV } = require('./constants/config');
+const { CHANNELS, DEFAULTS, ENV } = require('./constants/config');
 const { MESSAGES } = require('./constants/messages');
 
 
 const PORT = ENV.port;
-const POLL_INTERVAL_MS = 3000;
+const POLL_INTERVAL_MS = DEFAULTS.pollingIntervalMs;
 const TELEGRAM_POLLING_ENABLED = ENV.telegramPollingEnabled;
 const TELEGRAM_POLL_INTERVAL_MS = ENV.telegramPollIntervalMs;
 const AI_HANDOFF_MESSAGE = ENV.aiHandoffMessage || MESSAGES.ai.handoffDefault;
@@ -82,7 +82,10 @@ async function handleTelegramDocument(chatId, document, caption) {
 
     try {
       const { visitorToken, roomId } = await ensureRocketChatRoom(CHANNELS.telegram, chatId, `TG ${chatId}`);
-      const description = `Telegram document from TG ${chatId}. Indexed for AI with ${result.document.chunks} chunk(s).`;
+      const description = MESSAGES.bridge.telegramDocumentDescription(
+        chatId,
+        result.document.chunks
+      );
       await rocketchat.uploadLivechatFile(visitorToken, roomId, {
         filename: downloaded.filename,
         buffer: downloaded.buffer,
@@ -129,13 +132,11 @@ async function handleTelegramDocument(chatId, document, caption) {
 async function handleUnsupportedTelegramMessage(chatId, messageType, caption) {
   try {
     const { visitorToken, roomId } = await ensureRocketChatRoom(CHANNELS.telegram, chatId, `TG ${chatId}`);
-    const captionText = caption && caption.trim()
-      ? ` Caption: "${caption.trim()}"`
-      : '';
+    const captionText = MESSAGES.bridge.telegramUnsupportedCaption(caption);
     await rocketchat.sendMessageToRocketChat(
       visitorToken,
       roomId,
-      `[Telegram ${messageType}] User sent a ${messageType} message.${captionText} This bridge currently forwards text and supported documents only.`
+      MESSAGES.bridge.telegramUnsupportedRoomMessage(messageType, captionText)
     );
     await telegram.sendMessage(
       chatId,
@@ -183,14 +184,22 @@ async function forwardToRocketChat(platform, platformUserId, name, text) {
     //    can see the full AI conversation in Omnichannel, AND send it to the
     //    customer on the platform.
     if (aiReply) {
-      await rocketchat.sendMessageToRocketChat(visitorToken, roomId, `🤖 AI: ${aiReply}`);
+      await rocketchat.sendMessageToRocketChat(
+        visitorToken,
+        roomId,
+        MESSAGES.bridge.aiReplyForRoom(aiReply)
+      );
       try {
         await sendReplyToPlatform(platform, platformUserId, aiReply);
       } catch (err) {
         console.error(`[${platform}] Failed to send AI reply back to platform:`, err.message);
       }
     } else if (ai.isEnabled()) {
-      await rocketchat.sendMessageToRocketChat(visitorToken, roomId, `🤖 AI: ${AI_HANDOFF_MESSAGE}`);
+      await rocketchat.sendMessageToRocketChat(
+        visitorToken,
+        roomId,
+        MESSAGES.bridge.aiHandoffForRoom(AI_HANDOFF_MESSAGE)
+      );
       try {
         await sendReplyToPlatform(platform, platformUserId, AI_HANDOFF_MESSAGE);
       } catch (err) {

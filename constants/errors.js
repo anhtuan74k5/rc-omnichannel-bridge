@@ -23,7 +23,13 @@ const ERRORS = {
   },
   documents: {
     requiredContent: 'content must be a non-empty string',
+    requiredIdentity: 'platform and platformUserId are required',
+    invalidBuffer: 'buffer must be a non-empty Buffer',
+    unreadableContent: (filename) => `Could not extract readable text from "${filename}".`,
     unsupportedDocument: (extension) => `Unsupported document type "${extension || 'unknown'}".`,
+  },
+  ai: {
+    api: (status, data) => `AI API error ${status}: ${JSON.stringify(data)}`,
   },
 };
 

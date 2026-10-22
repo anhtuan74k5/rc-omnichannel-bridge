@@ -29,7 +29,7 @@ const COUNTRY_ALIASES = new Map([
 const { MESSAGES, WEATHER_CODES } = require('./constants/messages');
 
 function formatTemperature(value) {
-  return String(value).replace('.', ',');
+  return String(value);
 }
 
 function normalizeText(text) {
@@ -162,12 +162,12 @@ async function lookupPoliticalOfficeFromWikipedia(countryId, office) {
   return {
     directReply,
     context: [
-      'Live political office lookup from Wikipedia:',
-      `Page: ${summaryData.title}`,
-      incumbent ? `Incumbent: ${incumbent}` : '',
-      incumbentSince ? `Incumbent since: ${incumbentSince}` : '',
-      `Summary: ${summaryData.extract}`,
-      `Source: ${source}`,
+      MESSAGES.bridge.politicalLookupContext,
+      MESSAGES.bridge.wikipediaPage(summaryData.title),
+      incumbent ? MESSAGES.bridge.incumbent(incumbent) : '',
+      incumbentSince ? MESSAGES.bridge.incumbentSince(incumbentSince) : '',
+      MESSAGES.bridge.summary(summaryData.extract),
+      MESSAGES.bridge.source(source),
     ].filter(Boolean).join('\n'),
   };
 }
@@ -227,7 +227,8 @@ async function lookupWeather(message) {
   }
 
   const current = forecast.current;
-  const weatherText = WEATHER_CODES.get(current.weather_code) || `weather code ${current.weather_code}`;
+  const weatherText = WEATHER_CODES.get(current.weather_code)
+    || MESSAGES.bridge.weatherCode(current.weather_code);
   const placeName = `${place.name}${place.country ? `, ${place.country}` : ''}`;
   const reply = MESSAGES.liveLookup.weather(
     placeName,
@@ -241,13 +242,13 @@ async function lookupWeather(message) {
   return {
     directReply: reply,
     context: [
-      `Live weather lookup from Open-Meteo for ${placeName}:`,
-      `Time: ${current.time}`,
-      `Condition: ${weatherText}`,
-      `Temperature: ${current.temperature_2m} C`,
-      `Humidity: ${current.relative_humidity_2m}%`,
-      `Wind speed: ${current.wind_speed_10m} km/h`,
-      'Source: Open-Meteo geocoding and forecast APIs.',
+      MESSAGES.bridge.weatherLookupContext(placeName),
+      MESSAGES.bridge.weatherTime(current.time),
+      MESSAGES.bridge.weatherCondition(weatherText),
+      MESSAGES.bridge.weatherTemperature(current.temperature_2m),
+      MESSAGES.bridge.weatherHumidity(current.relative_humidity_2m),
+      MESSAGES.bridge.weatherWindSpeed(current.wind_speed_10m),
+      MESSAGES.bridge.weatherSource,
     ].join('\n'),
   };
 }
@@ -325,11 +326,11 @@ LIMIT 5`;
 
   return {
     context: [
-      `Live political office lookup from Wikidata:`,
-      `Country: ${countryLabel || countryName}`,
-      `Office type: ${office.label}`,
-      `Current holder(s): ${names.join(', ')}`,
-      'Source: Wikidata SPARQL query for current statement without end date.',
+      MESSAGES.bridge.wikidataLookupContext,
+      MESSAGES.bridge.country(countryLabel || countryName),
+      MESSAGES.bridge.officeType(office.label),
+      MESSAGES.bridge.currentHolders(names.join(', ')),
+      MESSAGES.bridge.wikidataSource,
     ].join('\n'),
   };
 }

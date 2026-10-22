@@ -18,6 +18,7 @@
 const documents = require('./documents');
 const liveLookup = require('./liveLookup');
 const { ENV } = require('./constants/config');
+const { ERRORS } = require('./constants/errors');
 const { MESSAGES } = require('./constants/messages');
 
 const AI_ENABLED = ENV.aiEnabled;
@@ -26,8 +27,7 @@ const AI_BASE_URL = ENV.aiBaseUrl;
 const AI_MODEL = ENV.aiModel;
 const AI_BUSINESS_CONTEXT = ENV.aiBusinessContext;
 
-// System prompt instructing the AI when to auto-reply vs hand off to human.
-const SYSTEM_PROMPT = `You are an AI customer-support assistant for a business.
+/* const SYSTEM_PROMPT = `You are an AI customer-support assistant for a business.
 Your job is to resolve common customer questions, collect useful context, and
 route to a human only when automation is not appropriate.
 
@@ -61,9 +61,9 @@ Rules:
 Respond ONLY with a JSON object, no other text:
 {"handled": true, "reply": "your answer here"}
 or
-{"handled": false}`;
+{"handled": false}`; */
 
-const DOCUMENT_SYSTEM_PROMPT = `You are an AI customer-support assistant for a business.
+/* const DOCUMENT_SYSTEM_PROMPT = `You are an AI customer-support assistant for a business.
 The customer has uploaded private documents. Use the provided document excerpts
 when they are relevant to the customer's question.
 
@@ -86,12 +86,15 @@ Rules:
 Respond ONLY with a JSON object, no other text:
 {"handled": true, "reply": "your answer here"}
 or
-{"handled": false}`;
+{"handled": false}`; */
+
+const SYSTEM_PROMPT = MESSAGES.ai.systemPrompt;
+const DOCUMENT_SYSTEM_PROMPT = MESSAGES.ai.documentSystemPrompt;
 
 function buildDocumentContext(chunks) {
   return chunks
     .map((chunk, index) => {
-      return `Excerpt ${index + 1} from ${chunk.filename}:\n${chunk.text}`;
+      return MESSAGES.bridge.documentExcerpt(index + 1, chunk.filename, chunk.text);
     })
     .join('\n\n---\n\n');
 }
@@ -106,14 +109,14 @@ function buildRuntimeContext() {
   }).format(now);
 
   const lines = [
-    `Current server date/time: ${currentDateTime}`,
-    `Timezone: ${timezone}`,
+    MESSAGES.ai.runtimeDateTime(currentDateTime),
+    MESSAGES.ai.runtimeTimezone(timezone),
   ];
 
   if (AI_BUSINESS_CONTEXT) {
     lines.push(`Business context:\n${AI_BUSINESS_CONTEXT}`);
   } else {
-    lines.push('Business context: not configured. Do not invent products, hours, prices, policies, address, or contact details.');
+    lines.push(MESSAGES.bridge.businessContextMissing);
   }
 
   return lines.join('\n');
@@ -164,7 +167,7 @@ async function askAI(customerMessage, context = {}) {
     console.log('[ai] Live lookup context available.');
     messages.splice(2, 0, {
       role: 'system',
-      content: `Live lookup result. Use this for the answer and mention the source briefly if useful:\n${liveContext.context}`,
+      content: MESSAGES.ai.liveLookupResult(liveContext.context),
     });
   }
 
@@ -187,7 +190,10 @@ async function askAI(customerMessage, context = {}) {
           { role: 'system', content: buildRuntimeContext() },
           {
             role: 'user',
-            content: `Document excerpts:\n${buildDocumentContext(retrieval.chunks)}\n\nCustomer question:\n${customerMessage}`,
+            content: MESSAGES.bridge.documentExcerpts(
+              buildDocumentContext(retrieval.chunks),
+              customerMessage
+            ),
           },
         ];
       }
@@ -210,7 +216,7 @@ async function askAI(customerMessage, context = {}) {
 
   const data = await res.json();
   if (!res.ok) {
-    throw new Error(`AI API error ${res.status}: ${JSON.stringify(data)}`);
+    throw new Error(ERRORS.ai.api(res.status, data));
   }
 
   const content = data.choices && data.choices[0] && data.choices[0].message
