@@ -14,10 +14,10 @@ const MESSAGES = {
   telegram: {
     documentUploaded: (filename, chunks) =>
       `Document "${filename}" was uploaded (${chunks} chunk(s)). You can now ask questions about it.`,
-    documentUploadFailed: (errorMessage) => `I couldn't upload the document: ${errorMessage}`,
+    documentUploadFailed: "Sorry, I couldn't process your document right now. Please try again later.",
     unsupportedMessage: 'I received your content, but the bot currently reads only text messages and PDF/DOCX/text documents. A support agent can view this notice in the system.',
-    uploadedDocumentStatus: (filename, mimeType, size, chunks, errorMessage) =>
-      `📎 Telegram uploaded document: ${filename} (${mimeType}, ${size}). Indexed for AI with ${chunks} chunk(s), but Rocket.Chat file upload failed: ${errorMessage}`,
+    uploadedDocumentStatus: (filename, mimeType, size, chunks) =>
+      `📎 Telegram uploaded document: ${filename} (${mimeType}, ${size}). Indexed for AI with ${chunks} chunk(s), but the Rocket.Chat file upload did not complete.`,
   },
   liveLookup: {
     weatherLocationPrompt: 'Which location would you like the weather for? For example: "What is the weather like in Hanoi today?"',

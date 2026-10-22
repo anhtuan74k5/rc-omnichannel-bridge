@@ -96,7 +96,12 @@ async function handleTelegramDocument(chatId, document, caption) {
         await rocketchat.sendMessageToRocketChat(
           visitorToken,
           roomId,
-          `📎 Telegram uploaded document: ${downloaded.filename} (${downloaded.mimeType}, ${formatBytes(downloaded.size)}). Indexed for AI with ${result.document.chunks} chunk(s), but Rocket.Chat file upload failed: ${syncErr.message}`
+          MESSAGES.telegram.uploadedDocumentStatus(
+            downloaded.filename,
+            downloaded.mimeType,
+            formatBytes(downloaded.size),
+            result.document.chunks
+          )
         );
       } catch (messageErr) {
         console.error(`[rocketchat] Failed to log Telegram document upload for ${chatId}:`, messageErr.message);
@@ -114,7 +119,7 @@ async function handleTelegramDocument(chatId, document, caption) {
   } catch (err) {
     console.error(`[telegram] Failed to handle document from chat ${chatId}:`, err.message);
     try {
-      await telegram.sendMessage(chatId, MESSAGES.telegram.documentUploadFailed(err.message));
+      await telegram.sendMessage(chatId, MESSAGES.telegram.documentUploadFailed);
     } catch (sendErr) {
       console.error(`[telegram] Failed to send document error to chat ${chatId}:`, sendErr.message);
     }
