@@ -227,7 +227,7 @@ async function lookupWeather(message) {
   }
 
   const current = forecast.current;
-  const weatherText = WEATHER_CODES.get(current.weather_code) || `mã thời tiết ${current.weather_code}`;
+  const weatherText = WEATHER_CODES.get(current.weather_code) || `weather code ${current.weather_code}`;
   const placeName = `${place.name}${place.country ? `, ${place.country}` : ''}`;
   const reply = MESSAGES.liveLookup.weather(
     placeName,
