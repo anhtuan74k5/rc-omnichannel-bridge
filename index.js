@@ -183,7 +183,7 @@ async function forwardToRocketChat(platform, platformUserId, name, text) {
       } catch (err) {
         console.error(`[${platform}] Failed to send AI reply back to platform:`, err.message);
       }
-    } else {
+    } else if (ai.isEnabled()) {
       await rocketchat.sendMessageToRocketChat(visitorToken, roomId, `🤖 AI: ${AI_HANDOFF_MESSAGE}`);
       try {
         await sendReplyToPlatform(platform, platformUserId, AI_HANDOFF_MESSAGE);
