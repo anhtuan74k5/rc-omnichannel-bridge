@@ -33,7 +33,8 @@ Rocket.Chat agent reply ──► polling (3s) ──► Facebook Graph API / Te
 ├── index.js          # Express server + polling loop + routes
 ├── rocketchat.js     # tích hợp Rocket.Chat livechat API
 ├── facebook.js       # webhook + gửi tin Facebook Messenger
-├── telegram.js       # webhook + gửi tin Telegram
+├── telegram.js       # Telegram webhook, polling, and message delivery
+├── constants/        # shared configuration, messages, logs, and errors
 ├── documents.js      # lưu/index tài liệu riêng theo từng user để AI trả lời
 ├── mapping.js        # lưu mapping (visitor token, room, platform) vào mapping.json
 └── mapping.json      # (tự tạo) dữ liệu mapping persist qua restart
@@ -66,6 +67,8 @@ Server sẽ chạy tại `http://localhost:3000`.
 | `FB_PAGE_ID` | ⬜* | Page ID (bắt buộc nếu dùng Facebook) |
 | `FB_VERIFY_TOKEN` | ⬜* | Verify token khớp với cấu hình webhook Facebook |
 | `TELEGRAM_BOT_TOKEN` | ⬜* | Bot token từ BotFather (bắt buộc nếu dùng Telegram) |
+| `DEBUG_POLLING` | ⬜ | Enable Rocket.Chat history polling logs |
+| `TZ` | ⬜ | Server timezone (mặc định `Asia/Bangkok`) |
 | `PORT` | ⬜ | Cổng server (mặc định `3000`) |
 
 \* Chỉ bắt buộc nếu bạn dùng nền tảng tương ứng. Có thể chạy chỉ 1 nền tảng.
