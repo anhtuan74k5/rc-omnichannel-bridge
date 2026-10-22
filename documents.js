@@ -11,12 +11,14 @@ const fs = require('fs');
 const path = require('path');
 const mammoth = require('mammoth');
 const { PDFParse } = require('pdf-parse');
+const { ENV } = require('./constants/config');
+const { ERRORS } = require('./constants/errors');
 
 const DATA_DIR = path.join(__dirname, 'data', 'documents');
-const CHUNK_SIZE = Number(process.env.DOCUMENT_CHUNK_SIZE || 1200);
-const CHUNK_OVERLAP = Number(process.env.DOCUMENT_CHUNK_OVERLAP || 150);
-const DEFAULT_TOP_K = Number(process.env.DOCUMENT_TOP_K || 4);
-const SUMMARY_TOP_K = Number(process.env.DOCUMENT_SUMMARY_TOP_K || 8);
+const CHUNK_SIZE = ENV.documentChunkSize;
+const CHUNK_OVERLAP = ENV.documentChunkOverlap;
+const DEFAULT_TOP_K = ENV.documentTopK;
+const SUMMARY_TOP_K = ENV.documentSummaryTopK;
 const TEXT_EXTENSIONS = new Set([
   '.txt',
   '.md',
@@ -246,7 +248,7 @@ function buildIndex(platform, platformUserId) {
 
 function uploadDocument({ platform, platformUserId, filename, content }) {
   if (typeof content !== 'string' || !content.trim()) {
-    throw new Error('content must be a non-empty string');
+    throw new Error(ERRORS.documents.requiredContent);
   }
 
   const originalDir = getOriginalDir(platform, platformUserId);
@@ -293,7 +295,7 @@ async function extractTextFromBuffer(filename, buffer) {
     return parsed.value || '';
   }
 
-  throw new Error(`Unsupported document type "${extension || 'unknown'}".`);
+  throw new Error(ERRORS.documents.unsupportedDocument(extension));
 }
 
 async function uploadDocumentBuffer({ platform, platformUserId, filename, buffer }) {

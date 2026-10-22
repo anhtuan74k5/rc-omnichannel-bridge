@@ -11,13 +11,10 @@
  */
 
 const mapping = require('./mapping');
+const { API, ENV, FILES, HEADERS, MIME_TYPES } = require('./constants/config');
+const { ERRORS } = require('./constants/errors');
 
-const ROCKETCHAT_URL = (process.env.ROCKETCHAT_URL || '').replace(/\/+$/, '');
-const AGENT_USERNAME = process.env.ROCKETCHAT_AGENT_USERNAME || '';
-const AGENT_PASSWORD = process.env.ROCKETCHAT_AGENT_PASSWORD || '';
-const AUTH_TOKEN = process.env.ROCKETCHAT_AUTH_TOKEN || '';
-const USER_ID = process.env.ROCKETCHAT_USER_ID || '';
-const DEPARTMENT_ID = process.env.ROCKETCHAT_DEPARTMENT_ID || '';
+const ROCKETCHAT_URL = ENV.rocketchatUrl.replace(/\/+$/, '');
 
 
 // Cached agent session
@@ -31,15 +28,15 @@ async function rcFetch(path, options = {}, retried = false) {
   const { authToken, userId } = await loginAgent();
 
   const headers = {
-    'Content-Type': 'application/json',
-    'X-Auth-Token': authToken,
-    'X-User-Id': userId,
+    [HEADERS.contentType]: 'application/json',
+    [HEADERS.authToken]: authToken,
+    [HEADERS.userId]: userId,
     ...(options.headers || {}),
   };
 
   const url = `${ROCKETCHAT_URL}${path}`;
-  const isPollingHistory = path.includes('/api/v1/livechat/messages.history/');
-  if (!isPollingHistory || process.env.DEBUG_POLLING === 'true') {
+  const isPollingHistory = path.includes(`${API.rocketChat.messagesHistoryPath}/`);
+  if (!isPollingHistory || ENV.debugPolling) {
     console.log(`[rocketchat] ${options.method || 'GET'} ${path}`);
   }
 
@@ -61,7 +58,7 @@ async function rcFetch(path, options = {}, retried = false) {
   }
 
   if (!res.ok) {
-    const err = new Error(`Rocket.Chat API error ${res.status}: ${text}`);
+    const err = new Error(ERRORS.rocketchat.api(res.status, text));
     err.status = res.status;
     err.body = body;
     throw err;
@@ -77,10 +74,10 @@ async function rcFetch(path, options = {}, retried = false) {
  * when present; otherwise POST /api/v1/login with agent credentials.
  */
 async function loginAgent() {
-  if (AUTH_TOKEN && USER_ID) {
+  if (ENV.authToken && ENV.userId) {
     return {
-      authToken: AUTH_TOKEN,
-      userId: USER_ID,
+      authToken: ENV.authToken,
+      userId: ENV.userId,
       expiresAt: Number.MAX_SAFE_INTEGER,
     };
   }
@@ -90,18 +87,18 @@ async function loginAgent() {
   }
 
   console.log('[rocketchat] Logging in agent...');
-  const res = await fetch(`${ROCKETCHAT_URL}/api/v1/login`, {
+  const res = await fetch(`${ROCKETCHAT_URL}${API.rocketChat.loginPath}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { [HEADERS.contentType]: 'application/json' },
     body: JSON.stringify({
-      user: AGENT_USERNAME,
-      password: AGENT_PASSWORD,
+      user: ENV.agentUsername,
+      password: ENV.agentPassword,
     }),
   });
 
   const body = await res.json();
   if (!res.ok || !body.data || !body.data.authToken) {
-    throw new Error(`Login failed (${res.status}): ${JSON.stringify(body)}`);
+    throw new Error(ERRORS.rocketchat.loginFailed(res.status, body));
   }
 
   agentSession = {
@@ -134,20 +131,20 @@ async function getOrCreateVisitor(platformUserId, name, department) {
   }
 
   console.log(`[rocketchat] Creating visitor for ${platformUserId} (${name})...`);
-  const body = await rcFetch('/api/v1/livechat/visitor', {
+  const body = await rcFetch(API.rocketChat.visitorPath, {
     method: 'POST',
     body: JSON.stringify({
       visitor: {
         token: visitorToken,
         name: name || `Visitor ${platformUserId}`,
         email: `${platformUserId}@bridge.local`,
-        department: department || DEPARTMENT_ID || undefined,
+        department: department || ENV.departmentId || undefined,
       },
     }),
   });
 
   if (!body || !body.success) {
-    throw new Error(`Failed to create visitor: ${JSON.stringify(body)}`);
+    throw new Error(ERRORS.rocketchat.visitorFailed(body));
   }
 
   console.log(`[rocketchat] Visitor created with token ${visitorToken}`);
@@ -168,10 +165,10 @@ async function getOrCreateRoom(visitorToken) {
   }
 
   console.log(`[rocketchat] Fetching room for token ${visitorToken}...`);
-  const body = await rcFetch(`/api/v1/livechat/room?token=${encodeURIComponent(visitorToken)}`);
+  const body = await rcFetch(`${API.rocketChat.roomPath}?token=${encodeURIComponent(visitorToken)}`);
 
   if (!body || !body.room || !body.room._id) {
-    throw new Error(`Failed to get room: ${JSON.stringify(body)}`);
+    throw new Error(ERRORS.rocketchat.roomFailed(body));
   }
 
   const roomId = body.room._id;
@@ -190,7 +187,7 @@ async function getOrCreateRoom(visitorToken) {
  */
 async function sendMessageToRocketChat(visitorToken, roomId, text) {
   console.log(`[rocketchat] Sending visitor message to room ${roomId}: "${text}"`);
-  const body = await rcFetch('/api/v1/livechat/message', {
+  const body = await rcFetch(API.rocketChat.messagePath, {
     method: 'POST',
     body: JSON.stringify({
       token: visitorToken,
@@ -200,7 +197,7 @@ async function sendMessageToRocketChat(visitorToken, roomId, text) {
   });
 
   if (!body || !body.success) {
-    throw new Error(`Failed to send message: ${JSON.stringify(body)}`);
+    throw new Error(ERRORS.rocketchat.messageFailed(body));
   }
 
   console.log('[rocketchat] Visitor message sent successfully.');
@@ -209,22 +206,22 @@ async function sendMessageToRocketChat(visitorToken, roomId, text) {
 
 async function uploadLivechatFile(visitorToken, roomId, { filename, buffer, mimeType, description }) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
-    throw new Error('buffer must be a non-empty Buffer');
+    throw new Error(ERRORS.rocketchat.uploadInvalidBuffer);
   }
 
   const form = new FormData();
-  const file = new Blob([buffer], { type: mimeType || 'application/octet-stream' });
-  form.append('file', file, filename || 'document');
+  const file = new Blob([buffer], { type: mimeType || MIME_TYPES.octetStream });
+  form.append('file', file, filename || FILES.defaultUpload);
   if (description) {
     form.append('description', description);
   }
 
-  const url = `${ROCKETCHAT_URL}/api/v1/livechat/upload/${encodeURIComponent(roomId)}`;
+  const url = `${ROCKETCHAT_URL}${API.rocketChat.uploadPath}/${encodeURIComponent(roomId)}`;
   console.log(`[rocketchat] Uploading visitor file to room ${roomId}: "${filename}"`);
   const res = await fetch(url, {
     method: 'POST',
     headers: {
-      'x-visitor-token': visitorToken,
+      [HEADERS.visitorToken]: visitorToken,
     },
     body: form,
   });
@@ -238,7 +235,7 @@ async function uploadLivechatFile(visitorToken, roomId, { filename, buffer, mime
   }
 
   if (!res.ok || !body || body.success === false) {
-    throw new Error(`Rocket.Chat livechat upload failed (${res.status}): ${text}`);
+    throw new Error(ERRORS.rocketchat.uploadFailed(res.status, text));
   }
 
   console.log('[rocketchat] Visitor file uploaded successfully.');
@@ -254,7 +251,7 @@ async function uploadLivechatFile(visitorToken, roomId, { filename, buffer, mime
  * messages (oldest first).
  */
 async function pollNewAgentMessages(roomId, visitorToken, lastMessageTimestamp) {
-  const url = `/api/v1/livechat/messages.history/${encodeURIComponent(roomId)}?token=${encodeURIComponent(visitorToken)}`;
+  const url = `${API.rocketChat.messagesHistoryPath}/${encodeURIComponent(roomId)}?token=${encodeURIComponent(visitorToken)}`;
   const body = await rcFetch(url);
 
   const messages = (body && body.messages) || [];

@@ -22,17 +22,18 @@ const facebook = require('./facebook');
 const telegram = require('./telegram');
 const ai = require('./ai');
 const documents = require('./documents');
+const { CHANNELS, ENV } = require('./constants/config');
+const { MESSAGES } = require('./constants/messages');
 
 
-const PORT = process.env.PORT || 3000;
+const PORT = ENV.port;
 const POLL_INTERVAL_MS = 3000;
-const TELEGRAM_POLLING_ENABLED = process.env.TELEGRAM_POLLING === 'true';
-const TELEGRAM_POLL_INTERVAL_MS = Number(process.env.TELEGRAM_POLL_INTERVAL_MS || 2000);
-const AI_HANDOFF_MESSAGE = process.env.AI_HANDOFF_MESSAGE
-  || 'Mình chưa có đủ thông tin để trả lời chính xác câu hỏi này. Mình đã chuyển nội dung cho nhân viên hỗ trợ, bạn vui lòng chờ trong giây lát nhé.';
+const TELEGRAM_POLLING_ENABLED = ENV.telegramPollingEnabled;
+const TELEGRAM_POLL_INTERVAL_MS = ENV.telegramPollIntervalMs;
+const AI_HANDOFF_MESSAGE = ENV.aiHandoffMessage || MESSAGES.ai.handoffDefault;
 
 const app = express();
-app.use(express.json({ limit: process.env.REQUEST_BODY_LIMIT || '2mb' }));
+app.use(express.json({ limit: ENV.requestBodyLimit }));
 
 let telegramPollingInProgress = false;
 
@@ -73,14 +74,14 @@ async function handleTelegramDocument(chatId, document, caption) {
   try {
     const downloaded = await telegram.downloadDocument(document);
     const result = await documents.uploadDocumentBuffer({
-      platform: 'telegram',
+      platform: CHANNELS.telegram,
       platformUserId: chatId,
       filename: downloaded.filename,
       buffer: downloaded.buffer,
     });
 
     try {
-      const { visitorToken, roomId } = await ensureRocketChatRoom('telegram', chatId, `TG ${chatId}`);
+      const { visitorToken, roomId } = await ensureRocketChatRoom(CHANNELS.telegram, chatId, `TG ${chatId}`);
       const description = `Telegram document from TG ${chatId}. Indexed for AI with ${result.document.chunks} chunk(s).`;
       await rocketchat.uploadLivechatFile(visitorToken, roomId, {
         filename: downloaded.filename,
@@ -104,16 +105,16 @@ async function handleTelegramDocument(chatId, document, caption) {
 
     await telegram.sendMessage(
       chatId,
-      `Đã upload tài liệu "${result.filename}" (${result.document.chunks} đoạn). Bạn có thể hỏi mình theo tài liệu này.`
+      MESSAGES.telegram.documentUploaded(result.filename, result.document.chunks)
     );
 
     if (caption && caption.trim()) {
-      await forwardToRocketChat('telegram', chatId, `TG ${chatId}`, caption.trim());
+      await forwardToRocketChat(CHANNELS.telegram, chatId, `TG ${chatId}`, caption.trim());
     }
   } catch (err) {
     console.error(`[telegram] Failed to handle document from chat ${chatId}:`, err.message);
     try {
-      await telegram.sendMessage(chatId, `Chưa upload được tài liệu: ${err.message}`);
+      await telegram.sendMessage(chatId, MESSAGES.telegram.documentUploadFailed(err.message));
     } catch (sendErr) {
       console.error(`[telegram] Failed to send document error to chat ${chatId}:`, sendErr.message);
     }
@@ -122,7 +123,7 @@ async function handleTelegramDocument(chatId, document, caption) {
 
 async function handleUnsupportedTelegramMessage(chatId, messageType, caption) {
   try {
-    const { visitorToken, roomId } = await ensureRocketChatRoom('telegram', chatId, `TG ${chatId}`);
+    const { visitorToken, roomId } = await ensureRocketChatRoom(CHANNELS.telegram, chatId, `TG ${chatId}`);
     const captionText = caption && caption.trim()
       ? ` Caption: "${caption.trim()}"`
       : '';
@@ -133,7 +134,7 @@ async function handleUnsupportedTelegramMessage(chatId, messageType, caption) {
     );
     await telegram.sendMessage(
       chatId,
-      'Mình đã nhận được nội dung bạn gửi, nhưng hiện tại bot chỉ đọc được tin nhắn văn bản và tài liệu PDF/DOCX/text. Nhân viên hỗ trợ có thể xem thông báo này trong hệ thống.'
+      MESSAGES.telegram.unsupportedMessage
     );
   } catch (err) {
     console.error(`[telegram] Failed to log ${messageType} message from chat ${chatId}:`, err.message);
@@ -198,7 +199,7 @@ async function forwardToRocketChat(platform, platformUserId, name, text) {
         await sendReplyToPlatform(
           platform,
           platformUserId,
-          'Mình đã nhận được tin nhắn của bạn, nhưng hiện chưa kết nối được hệ thống hỗ trợ. Bạn vui lòng thử lại sau ít phút nhé.'
+          MESSAGES.routing.failed
         );
       } catch (sendErr) {
         console.error(`[${platform}] Failed to send routing error notice:`, sendErr.message);

@@ -7,9 +7,8 @@
  *  - sendMessage()          : send a message back via Graph API v25.0
  */
 
-const FB_PAGE_ACCESS_TOKEN = process.env.FB_PAGE_ACCESS_TOKEN;
-const FB_VERIFY_TOKEN = process.env.FB_VERIFY_TOKEN;
-const FB_GRAPH_VERSION = 'v25.0';
+const { API, ENV, HEADERS } = require('./constants/config');
+const { ERRORS } = require('./constants/errors');
 
 /**
  * Handle GET webhook verification from Facebook.
@@ -22,7 +21,7 @@ function handleVerify(req, res) {
 
   console.log(`[facebook] Webhook verify request: mode=${mode}, token=${token}`);
 
-  if (mode === 'subscribe' && token === FB_VERIFY_TOKEN) {
+  if (mode === 'subscribe' && token === ENV.facebookVerifyToken) {
     console.log('[facebook] Webhook verified successfully.');
     res.status(200).send(challenge);
   } else {
@@ -70,7 +69,7 @@ async function handleWebhook(body, onMessage) {
  * POST https://graph.facebook.com/v25.0/me/messages
  */
 async function sendMessage(psid, text) {
-  const url = `https://graph.facebook.com/${FB_GRAPH_VERSION}/me/messages?access_token=${FB_PAGE_ACCESS_TOKEN}`;
+  const url = `https://graph.facebook.com/${API.facebook.graphVersion}/me/messages?access_token=${ENV.facebookPageAccessToken}`;
   const body = {
     recipient: { id: psid },
     message: { text },
@@ -79,13 +78,13 @@ async function sendMessage(psid, text) {
   console.log(`[facebook] Sending message to PSID ${psid}: "${text}"`);
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { [HEADERS.contentType]: 'application/json' },
     body: JSON.stringify(body),
   });
 
   const data = await res.json();
   if (!res.ok || data.error) {
-    throw new Error(`Facebook send failed (${res.status}): ${JSON.stringify(data)}`);
+    throw new Error(ERRORS.facebook.sendFailed(res.status, data));
   }
 
   console.log(`[facebook] Message sent to PSID ${psid}.`);

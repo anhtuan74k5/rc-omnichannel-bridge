@@ -26,29 +26,7 @@ const COUNTRY_ALIASES = new Map([
   ['china', 'Q148'],
 ]);
 
-const WEATHER_CODES = new Map([
-  [0, 'trời quang'],
-  [1, 'ít mây'],
-  [2, 'mây rải rác'],
-  [3, 'nhiều mây'],
-  [45, 'sương mù'],
-  [48, 'sương mù đóng băng'],
-  [51, 'mưa phùn nhẹ'],
-  [53, 'mưa phùn vừa'],
-  [55, 'mưa phùn dày'],
-  [61, 'mưa nhẹ'],
-  [63, 'mưa vừa'],
-  [65, 'mưa to'],
-  [71, 'tuyết nhẹ'],
-  [73, 'tuyết vừa'],
-  [75, 'tuyết dày'],
-  [80, 'mưa rào nhẹ'],
-  [81, 'mưa rào vừa'],
-  [82, 'mưa rào mạnh'],
-  [95, 'dông'],
-  [96, 'dông kèm mưa đá nhẹ'],
-  [99, 'dông kèm mưa đá mạnh'],
-]);
+const { MESSAGES, WEATHER_CODES } = require('./constants/messages');
 
 function formatTemperature(value) {
   return String(value).replace('.', ',');
@@ -178,7 +156,7 @@ async function lookupPoliticalOfficeFromWikipedia(countryId, office) {
     : summaryUrl;
 
   const directReply = incumbent
-    ? `${summaryData.title}: ${incumbent}${incumbentSince ? `, giữ chức từ ${incumbentSince}` : ''}. Nguồn: Wikipedia (${source}).`
+    ? MESSAGES.liveLookup.wikipediaSource(summaryData.title, incumbent, incumbentSince, source)
     : '';
 
   return {
@@ -217,7 +195,7 @@ async function lookupWeather(message) {
   const location = extractWeatherLocation(message);
   if (!location) {
     return {
-      directReply: 'Bạn muốn xem thời tiết ở khu vực nào? Ví dụ: "Thời tiết Hà Nội hôm nay thế nào?"',
+      directReply: MESSAGES.liveLookup.weatherLocationPrompt,
     };
   }
 
@@ -232,7 +210,7 @@ async function lookupWeather(message) {
   const place = geoData.results && geoData.results[0];
   if (!geoRes.ok || !place) {
     return {
-      directReply: `Mình chưa tìm được địa điểm "${location}". Bạn gửi rõ hơn tên thành phố/tỉnh giúp mình nhé.`,
+      directReply: MESSAGES.liveLookup.weatherLocationNotFound(location),
     };
   }
 
@@ -251,11 +229,14 @@ async function lookupWeather(message) {
   const current = forecast.current;
   const weatherText = WEATHER_CODES.get(current.weather_code) || `mã thời tiết ${current.weather_code}`;
   const placeName = `${place.name}${place.country ? `, ${place.country}` : ''}`;
-  const reply = [
-    `Thời tiết hiện tại ở ${placeName}: ${weatherText}, ${formatTemperature(current.temperature_2m)}°C.`,
-    `Độ ẩm ${current.relative_humidity_2m}%, gió ${formatTemperature(current.wind_speed_10m)} km/h.`,
-    `Cập nhật lúc ${current.time}. Nguồn: Open-Meteo.`,
-  ].join(' ');
+  const reply = MESSAGES.liveLookup.weather(
+    placeName,
+    weatherText,
+    formatTemperature(current.temperature_2m),
+    current.relative_humidity_2m,
+    formatTemperature(current.wind_speed_10m),
+    current.time
+  ).join(' ');
 
   return {
     directReply: reply,
@@ -302,7 +283,7 @@ async function lookupPoliticalOffice(message) {
   const countryName = extractCountryName(message);
   if (!countryName) {
     return {
-      directReply: 'Bạn muốn hỏi chức danh hiện tại của quốc gia nào?',
+      directReply: MESSAGES.liveLookup.officeTypePrompt,
     };
   }
 

@@ -17,12 +17,14 @@
 
 const documents = require('./documents');
 const liveLookup = require('./liveLookup');
+const { ENV } = require('./constants/config');
+const { MESSAGES } = require('./constants/messages');
 
-const AI_ENABLED = process.env.AI_ENABLED === 'true';
-const AI_API_KEY = process.env.AI_API_KEY || '';
-const AI_BASE_URL = (process.env.AI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '');
-const AI_MODEL = process.env.AI_MODEL || 'gpt-4o-mini';
-const AI_BUSINESS_CONTEXT = (process.env.AI_BUSINESS_CONTEXT || '').trim();
+const AI_ENABLED = ENV.aiEnabled;
+const AI_API_KEY = ENV.aiApiKey;
+const AI_BASE_URL = ENV.aiBaseUrl;
+const AI_MODEL = ENV.aiModel;
+const AI_BUSINESS_CONTEXT = ENV.aiBusinessContext;
 
 // System prompt instructing the AI when to auto-reply vs hand off to human.
 const SYSTEM_PROMPT = `You are an AI customer-support assistant for a business.
@@ -96,7 +98,7 @@ function buildDocumentContext(chunks) {
 
 function buildRuntimeContext() {
   const now = new Date();
-  const timezone = process.env.TZ || 'Asia/Bangkok';
+  const timezone = ENV.timezone;
   const currentDateTime = new Intl.DateTimeFormat('vi-VN', {
     timeZone: timezone,
     dateStyle: 'full',
@@ -120,18 +122,11 @@ function buildRuntimeContext() {
 function getStaticReply(customerMessage) {
   const text = String(customerMessage || '').trim().toLowerCase();
   if (text === '/start' || text === 'start') {
-    return 'Xin chào! Mình có thể trả lời câu hỏi đơn giản, tra thời tiết, xem một số thông tin hiện hành, đọc tài liệu PDF/DOCX/text bạn gửi, hoặc chuyển cho nhân viên hỗ trợ khi cần.';
+    return MESSAGES.ai.start;
   }
 
   if (text === '/help' || text === 'help') {
-    return [
-      'Bạn có thể nhắn câu hỏi trực tiếp, ví dụ:',
-      '- Thời tiết Hà Nội hôm nay thế nào?',
-      '- Tổng thống hiện tại của Mỹ là ai?',
-      '- Tóm tắt file tôi vừa gửi',
-      '- Cho tôi gặp nhân viên hỗ trợ',
-      'Bot hiện đọc được tin nhắn văn bản và tài liệu PDF/DOCX/text.',
-    ].join('\n');
+    return MESSAGES.ai.help;
   }
 
   return '';
