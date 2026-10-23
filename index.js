@@ -26,6 +26,7 @@ const { CHANNELS, DEFAULTS, ENV } = require('./constants/config');
 const { MESSAGES } = require('./constants/messages');
 const { dumpRocketChatMessage } = require('./debugDump');
 const { downloadRocketChatFile, isPermanentDownloadError } = require('./media/rocketchatFiles');
+const { downloadTelegramFile, isTelegramFileTooLarge } = require('./media/telegramFiles');
 
 
 const PORT = ENV.port;
@@ -163,6 +164,88 @@ async function handleUnsupportedTelegramMessage(chatId, messageType, caption) {
   } catch (err) {
     console.error(`[telegram] Failed to log ${messageType} message from chat ${chatId}:`, err.message);
   }
+
+}
+
+function selectTelegramPhoto(photo) {
+  return (Array.isArray(photo) ? photo : [])
+    .filter((item) => item && item.file_id)
+    .sort((a, b) => Number(b.file_size || 0) - Number(a.file_size || 0)
+      || Number(b.width || 0) * Number(b.height || 0) - Number(a.width || 0) * Number(a.height || 0))[0];
+}
+
+function getTelegramMediaDescriptor(messageType, media) {
+  const timestamp = Date.now();
+  if (messageType === 'photo') {
+    const photo = selectTelegramPhoto(media);
+    if (!photo) throw new Error('Telegram photo has no usable file_id');
+    return { fileId: photo.file_id, filename: `photo_${timestamp}.jpg`, mimeType: 'image/jpeg' };
+  }
+  if (messageType === 'video') {
+    return { fileId: media && media.file_id, filename: media && media.file_name || `video_${timestamp}.mp4`, mimeType: media && media.mime_type || 'video/mp4' };
+  }
+  if (messageType === 'voice') {
+    return { fileId: media && media.file_id, filename: `voice_${timestamp}.ogg`, mimeType: 'audio/ogg' };
+  }
+  if (messageType === 'audio') {
+    return { fileId: media && media.file_id, filename: media && (media.file_name || media.title) || `audio_${timestamp}`, mimeType: media && media.mime_type || 'audio/mpeg' };
+  }
+  if (messageType === 'animation') {
+    return { fileId: media && media.file_id, filename: media && media.file_name || `animation_${timestamp}.mp4`, mimeType: 'video/mp4' };
+  }
+  if (messageType === 'video_note') {
+    return { fileId: media && media.file_id, filename: `videonote_${timestamp}.mp4`, mimeType: 'video/mp4' };
+  }
+  if (messageType === 'sticker' && media && !media.is_animated && !media.is_video) {
+    return { fileId: media.file_id, filename: `sticker_${timestamp}.webp`, mimeType: 'image/webp' };
+  }
+  return null;
+}
+
+async function handleTelegramMedia(chatId, messageType, media, caption) {
+  const descriptor = getTelegramMediaDescriptor(messageType, media);
+  if (!descriptor) {
+    await handleUnsupportedTelegramMessage(chatId, messageType, caption);
+    return;
+  }
+
+  try {
+    const downloaded = await downloadTelegramFile(descriptor.fileId, {
+      maxBytes: ENV.telegramMaxMediaBytes,
+    });
+    const { visitorToken, roomId } = await ensureRocketChatRoom(CHANNELS.telegram, chatId, `TG ${chatId}`);
+    await rocketchat.uploadLivechatFile(visitorToken, roomId, {
+      filename: descriptor.filename,
+      buffer: downloaded.buffer,
+      mimeType: descriptor.mimeType,
+    });
+    if (caption && caption.trim()) {
+      await forwardToRocketChat(CHANNELS.telegram, chatId, `TG ${chatId}`, caption.trim());
+    }
+  } catch (err) {
+    console.error(`[telegram] Failed to handle ${messageType} from chat ${chatId}:`, err.message);
+    try {
+      await telegram.sendMessage(
+        chatId,
+        isTelegramFileTooLarge(err)
+          ? MESSAGES.telegram.mediaTooLarge
+          : MESSAGES.telegram.mediaUploadFailed
+      );
+    } catch (sendErr) {
+      console.error(`[telegram] Failed to send ${messageType} error notice:`, sendErr.message);
+    }
+    try {
+      const { visitorToken, roomId } = await ensureRocketChatRoom(CHANNELS.telegram, chatId, `TG ${chatId}`);
+      await rocketchat.sendMessageToRocketChat(
+        visitorToken,
+        roomId,
+        MESSAGES.telegram.mediaUploadStatus(messageType, descriptor.filename, err.message)
+      );
+    } catch (roomErr) {
+      console.error(`[rocketchat] Failed to log ${messageType} upload error:`, roomErr.message);
+    }
+    if (!isTelegramFileTooLarge(err)) throw err;
+  }
 }
 
 /**
@@ -281,7 +364,7 @@ app.post('/webhook/telegram', async (req, res) => {
   try {
     await telegram.handleWebhook(req.body, async (chatId, text) => {
       await forwardToRocketChat('telegram', chatId, `TG ${chatId}`, text);
-    }, handleTelegramDocument, handleUnsupportedTelegramMessage);
+    }, handleTelegramDocument, handleUnsupportedTelegramMessage, handleTelegramMedia);
     res.sendStatus(200);
   } catch (err) {
     console.error('[telegram] Error handling webhook:', err.message);
@@ -332,7 +415,7 @@ async function pollTelegramUpdates() {
   try {
     await telegram.pollUpdates(async (chatId, text) => {
       await forwardToRocketChat('telegram', chatId, `TG ${chatId}`, text);
-    }, handleTelegramDocument, handleUnsupportedTelegramMessage);
+    }, handleTelegramDocument, handleUnsupportedTelegramMessage, handleTelegramMedia);
   } catch (err) {
     console.error('[telegram] Error polling updates:', err.message);
   } finally {

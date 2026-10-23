@@ -9,6 +9,7 @@ const DEFAULTS = Object.freeze({
   telegramPollIntervalMs: 2000,
   requestBodyLimit: '2mb',
   telegramMaxDocumentBytes: 100 * 1024 * 1024,
+  telegramMaxMediaBytes: 20 * 1024 * 1024,
   aiBaseUrl: 'https://api.openai.com/v1',
   aiModel: 'gpt-4o-mini',
   timezone: 'Asia/Bangkok',
@@ -107,6 +108,9 @@ const ENV = Object.freeze({
   debugDumpPayloads: process.env.DEBUG_DUMP_PAYLOADS === 'true',
   telegramMaxDocumentBytes: Number(
     process.env.TELEGRAM_MAX_DOCUMENT_BYTES || DEFAULTS.telegramMaxDocumentBytes
+  ),
+  telegramMaxMediaBytes: Number(
+    process.env.TELEGRAM_MAX_MEDIA_BYTES || DEFAULTS.telegramMaxMediaBytes
   ),
   telegramPollingEnabled: process.env.TELEGRAM_POLLING === 'true',
   telegramPollIntervalMs: Number(

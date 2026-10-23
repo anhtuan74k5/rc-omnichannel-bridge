@@ -40,7 +40,7 @@ function getMessageType(message) {
  * @param {object} body - parsed JSON body
  * @param {function} onMessage - async (chatId, text) => void
  */
-async function handleWebhook(body, onMessage, onDocument, onUnsupportedMessage) {
+async function handleWebhook(body, onMessage, onDocument, onUnsupportedMessage, onMedia) {
   try {
     dumpTelegramUpdate(body);
   } catch (err) {
@@ -58,6 +58,7 @@ async function handleWebhook(body, onMessage, onDocument, onUnsupportedMessage) 
   const text = message.text;
   const caption = message.caption;
   const document = message.document;
+  const mediaType = getMessageType(message);
 
   if (!chatId) {
     log.warn('[telegram] Update without chat id, skipping.');
@@ -72,16 +73,18 @@ async function handleWebhook(body, onMessage, onDocument, onUnsupportedMessage) 
     if (onDocument) {
       await onDocument(chatId, document, caption);
     }
+  } else if (mediaType !== 'unsupported' && onMedia) {
+    log.info('[telegram] Received media', { chatId, type: mediaType });
+    await onMedia(chatId, mediaType, message[mediaType], caption);
   } else {
-    const messageType = getMessageType(message);
-    log.info('[telegram] Received message', { chatId, type: messageType, length: 0 });
+    log.info('[telegram] Received message', { chatId, type: mediaType, length: 0 });
     if (onUnsupportedMessage) {
-      await onUnsupportedMessage(chatId, messageType, caption);
+      await onUnsupportedMessage(chatId, mediaType, caption);
     }
   }
 }
 
-async function pollUpdates(onMessage, onDocument, onUnsupportedMessage) {
+async function pollUpdates(onMessage, onDocument, onUnsupportedMessage, onMedia) {
   if (!ENV.telegramBotToken) return;
 
   const params = new URLSearchParams({
@@ -107,7 +110,7 @@ async function pollUpdates(onMessage, onDocument, onUnsupportedMessage) {
     }
 
     try {
-      await handleWebhook(update, onMessage, onDocument, onUnsupportedMessage);
+      await handleWebhook(update, onMessage, onDocument, onUnsupportedMessage, onMedia);
       rememberProcessedUpdate(updateId);
       updateRetryCounts.delete(updateId);
       lastUpdateId = updateId;
