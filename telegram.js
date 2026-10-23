@@ -7,11 +7,14 @@
  *  - sendMessage()          : send a message back via Bot API
  */
 
+require('dotenv').config();
+
 const { API, DOCUMENT_EXTENSIONS, ENV, FILES, HEADERS, MIME_TYPES, TELEGRAM_MESSAGE_TYPES } = require('./constants/config');
 const { ERRORS } = require('./constants/errors');
 const { dumpTelegramUpdate } = require('./debugDump');
 const { fetchWithTimeout } = require('./httpClient');
 const { log } = require('./logger');
+const { rcToTelegramText, splitTelegramText, telegramToRcText } = require('./textFormat');
 let lastUpdateId = 0;
 const processedUpdateIds = new Set();
 const updateRetryCounts = new Map();
@@ -55,13 +58,18 @@ async function handleWebhook(body, onMessage, onDocument, onUnsupportedMessage, 
   }
 
   const chatId = message.chat && message.chat.id;
-  const text = message.text;
+  const text = message.text && telegramToRcText(message.text);
   const caption = message.caption;
   const document = message.document;
   const mediaType = getMessageType(message);
 
   if (!chatId) {
     log.warn('[telegram] Update without chat id, skipping.');
+    return;
+  }
+  if (ENV.telegramAllowedChatIds.length > 0
+    && !ENV.telegramAllowedChatIds.includes(String(chatId))) {
+    log.warn('[telegram] Ignoring message from chat outside the allowlist.');
     return;
   }
 
@@ -186,25 +194,25 @@ async function downloadDocument(document) {
  */
 async function sendMessage(chatId, text) {
   const url = `${API.telegram.baseUrl}/bot${ENV.telegramBotToken}/sendMessage`;
-  const body = {
-    chat_id: chatId,
-    text,
-  };
+  const textParts = rcToTelegramText(text);
 
-  log.info('[telegram] Sending message', { chatId, type: 'text', length: text.length });
-  const res = await fetchWithTimeout(url, {
-    method: 'POST',
-    headers: { [HEADERS.contentType]: 'application/json' },
-    body: JSON.stringify(body),
-  }, { retries: 0 });
-
-  const data = await res.json();
-  if (!res.ok || !data.ok) {
-    throw new Error(ERRORS.telegram.sendFailed(res.status, data));
+  let lastData;
+  for (const part of textParts) {
+    log.info('[telegram] Sending message', { chatId, type: 'text', length: part.length });
+    const res = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: { [HEADERS.contentType]: 'application/json; charset=utf-8' },
+      body: JSON.stringify({ chat_id: chatId, text: part }),
+    }, { retries: 0 });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      throw new Error(ERRORS.telegram.sendFailed(res.status, data));
+    }
+    lastData = data;
   }
 
   log.info('[telegram] Message sent', { chatId, type: 'text' });
-  return data;
+  return lastData;
 }
 
 function mediaError(status, data) {
@@ -220,7 +228,8 @@ async function sendTelegramMedia(method, field, chatId, descriptor, caption) {
   const url = `${API.telegram.baseUrl}/bot${ENV.telegramBotToken}/${method}`;
   const form = new FormData();
   form.append('chat_id', String(chatId));
-  const captionText = String(caption || '');
+  const captionParts = splitTelegramText(caption, 1024);
+  const captionText = captionParts[0] || '';
   if (captionText) form.append('caption', captionText.slice(0, 1024));
   form.append(field, new Blob([descriptor.buffer], {
     type: descriptor.mimeType || MIME_TYPES.octetStream,
@@ -237,8 +246,10 @@ async function sendTelegramMedia(method, field, chatId, descriptor, caption) {
 
 async function sendMediaPart(method, field, chatId, descriptor, caption) {
   const result = await sendTelegramMedia(method, field, chatId, descriptor, caption);
-  const remainder = String(caption || '').slice(1024);
-  if (remainder) await sendMessage(chatId, remainder);
+  const captionParts = splitTelegramText(caption, 1024);
+  for (const remainder of captionParts.slice(1)) {
+    await sendMessage(chatId, remainder);
+  }
   return result;
 }
 
@@ -278,6 +289,28 @@ async function sendMedia(chatId, descriptor, caption) {
   return sender(chatId, descriptor, caption);
 }
 
+async function setWebhook(webhookUrl = ENV.telegramWebhookUrl) {
+  if (!ENV.telegramBotToken) throw new Error(ERRORS.telegram.tokenMissing);
+  if (!webhookUrl) throw new Error('TELEGRAM_WEBHOOK_URL is required');
+  const body = {
+    url: webhookUrl,
+    allowed_updates: API.telegram.allowedUpdates,
+  };
+  if (ENV.telegramWebhookSecret) body.secret_token = ENV.telegramWebhookSecret;
+  const res = await fetchWithTimeout(
+    `${API.telegram.baseUrl}/bot${ENV.telegramBotToken}/setWebhook`,
+    {
+      method: 'POST',
+      headers: { [HEADERS.contentType]: 'application/json; charset=utf-8' },
+      body: JSON.stringify(body),
+    },
+    { retries: 0 }
+  );
+  const data = await res.json();
+  if (!res.ok || !data.ok) throw new Error(ERRORS.telegram.sendFailed(res.status, data));
+  return data;
+}
+
 module.exports = {
   downloadDocument,
   handleWebhook,
@@ -290,4 +323,14 @@ module.exports = {
   sendPhoto,
   sendVideo,
   sendVoice,
+  setWebhook,
 };
+
+if (require.main === module && process.argv.includes('--set-webhook')) {
+  setWebhook()
+    .then(() => console.log('[telegram] Webhook configured.'))
+    .catch((err) => {
+      console.error('[telegram] Failed to configure webhook:', err.message);
+      process.exitCode = 1;
+    });
+}

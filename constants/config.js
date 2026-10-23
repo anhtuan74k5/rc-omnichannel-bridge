@@ -22,6 +22,7 @@ const DEFAULTS = Object.freeze({
   maxOutboundMediaBytes: 50 * 1024 * 1024,
   telegramMaxUpdateRetries: 3,
   rocketChatMaxMessageRetries: 3,
+  telegramWebhookPath: '/webhook/telegram',
 });
 
 const API = Object.freeze({
@@ -102,6 +103,13 @@ const ENV = Object.freeze({
   userId: process.env.ROCKETCHAT_USER_ID || '',
   departmentId: process.env.ROCKETCHAT_DEPARTMENT_ID || '',
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
+  telegramWebhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET || '',
+  telegramWebhookUrl: process.env.TELEGRAM_WEBHOOK_URL || '',
+  telegramAllowedChatIds: (process.env.TELEGRAM_ALLOWED_CHAT_IDS || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean),
+  adminApiKey: process.env.ADMIN_API_KEY || '',
   facebookPageAccessToken: process.env.FB_PAGE_ACCESS_TOKEN || '',
   facebookVerifyToken: process.env.FB_VERIFY_TOKEN || '',
   debugPolling: process.env.DEBUG_POLLING === 'true',

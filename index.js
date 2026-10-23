@@ -15,6 +15,7 @@
 require('dotenv').config();
 
 const express = require('express');
+const crypto = require('crypto');
 
 const mapping = require('./mapping');
 const rocketchat = require('./rocketchat');
@@ -266,7 +267,7 @@ async function forwardToRocketChat(platform, platformUserId, name, text) {
       const decision = await ai.askAI(text, { platform, platformUserId });
       if (decision.handled && decision.reply) {
         aiReply = decision.reply;
-        console.log(`[ai] AI auto-replied to ${platform}:${platformUserId}: "${aiReply}"`);
+        console.log(`[ai] AI auto-replied to ${platform}:${platformUserId}.`);
       } else {
         console.log(`[ai] AI cannot handle, handing off to agent for ${platform}:${platformUserId}.`);
       }
@@ -361,6 +362,13 @@ app.post('/webhook/facebook', async (req, res) => {
 // ============================================================
 
 app.post('/webhook/telegram', async (req, res) => {
+  if (ENV.telegramWebhookSecret) {
+    const expected = Buffer.from(ENV.telegramWebhookSecret);
+    const received = Buffer.from(String(req.get('X-Telegram-Bot-Api-Secret-Token') || ''));
+    if (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) {
+      return res.sendStatus(401);
+    }
+  }
   try {
     await telegram.handleWebhook(req.body, async (chatId, text) => {
       await forwardToRocketChat('telegram', chatId, `TG ${chatId}`, text);
@@ -385,6 +393,8 @@ app.get('/health', (req, res) => {
 // ============================================================
 
 app.post('/documents/upload', (req, res) => {
+  const authResult = authorizeAdmin(req);
+  if (authResult) return res.status(authResult.status).json({ success: false, error: authResult.message });
   try {
     const result = documents.uploadDocument(req.body || {});
     res.json({ success: true, ...result });
@@ -395,6 +405,8 @@ app.post('/documents/upload', (req, res) => {
 });
 
 app.get('/documents', (req, res) => {
+  const authResult = authorizeAdmin(req);
+  if (authResult) return res.status(authResult.status).json({ success: false, error: authResult.message });
   try {
     const { platform, platformUserId } = req.query;
     const result = documents.listDocuments(platform, platformUserId);
@@ -505,7 +517,7 @@ async function pollAgentMessages() {
         }
 
         console.log(
-          `[poll] New agent message in room ${entry.roomId} -> ${entry.platform}:${entry.platformUserId}: "${text}"`
+          `[poll] New agent message in room ${entry.roomId} -> ${entry.platform}:${entry.platformUserId}`
         );
 
         try {
@@ -588,6 +600,8 @@ async function start() {
   if (TELEGRAM_POLLING_ENABLED) {
     setInterval(pollTelegramUpdates, TELEGRAM_POLL_INTERVAL_MS);
     console.log(`[startup] Telegram polling enabled (every ${TELEGRAM_POLL_INTERVAL_MS / 1000}s).`);
+  } else if (!ENV.telegramWebhookSecret) {
+    console.warn('[startup] TELEGRAM_WEBHOOK_SECRET is not set while Telegram polling is disabled; webhook requests are unauthenticated.');
   }
 
 
@@ -598,4 +612,20 @@ async function start() {
   });
 }
 
-start();
+if (require.main === module) start();
+
+function authorizeAdmin(req) {
+  if (!ENV.adminApiKey) {
+    return { status: 503, message: 'ADMIN_API_KEY is not configured; document endpoints are disabled.' };
+  }
+  const authorization = String(req.get('Authorization') || '');
+  const supplied = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+  const expected = Buffer.from(ENV.adminApiKey);
+  const received = Buffer.from(supplied);
+  if (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) {
+    return { status: 401, message: 'Authorization Bearer token is required.' };
+  }
+  return null;
+}
+
+module.exports = { app, authorizeAdmin, start };

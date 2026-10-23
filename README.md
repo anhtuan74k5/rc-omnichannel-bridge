@@ -67,7 +67,12 @@ Server sẽ chạy tại `http://localhost:3000`.
 | `FB_PAGE_ID` | ⬜* | Page ID (bắt buộc nếu dùng Facebook) |
 | `FB_VERIFY_TOKEN` | ⬜* | Verify token khớp với cấu hình webhook Facebook |
 | `TELEGRAM_BOT_TOKEN` | ⬜* | Bot token từ BotFather (bắt buộc nếu dùng Telegram) |
+| `TELEGRAM_WEBHOOK_SECRET` | ⬜ | Secret kiểm tra header webhook Telegram |
+| `TELEGRAM_WEBHOOK_URL` | ⬜ | URL public dùng cho `npm run tg:set-webhook` |
+| `TELEGRAM_ALLOWED_CHAT_IDS` | ⬜ | Danh sách chat ID cách nhau bằng dấu phẩy; rỗng là cho phép tất cả |
+| `ADMIN_API_KEY` | ⬜ | Bật bảo vệ Bearer cho `/documents` và `/documents/upload` |
 | `DEBUG_POLLING` | ⬜ | Enable Rocket.Chat history polling logs |
+| `DEBUG_DUMP_PAYLOADS` | ⬜ | Dump có chọn lọc payload media đã redact vào `debug-dumps/` |
 | `TZ` | ⬜ | Server timezone (mặc định `Asia/Bangkok`) |
 | `PORT` | ⬜ | Cổng server (mặc định `3000`) |
 
@@ -133,6 +138,17 @@ curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
 > curl "https://api.telegram.org/bot<TOKEN>/getWebhookInfo"
 > ```
 > Nếu `"url":""` nghĩa là chưa đăng ký — hãy chạy lệnh `setWebhook` ở trên.
+
+Có thể cấu hình bằng helper (tự truyền `secret_token` nếu đã đặt secret):
+
+```env
+TELEGRAM_WEBHOOK_URL=https://example.com/webhook/telegram
+TELEGRAM_WEBHOOK_SECRET=change-this-secret
+```
+
+```bash
+npm run tg:set-webhook
+```
 
 
 
@@ -226,6 +242,14 @@ curl -X POST "http://localhost:3000/documents/upload" \
   }'
 ```
 
+Các endpoint tài liệu luôn yêu cầu:
+
+```bash
+  -H "Authorization: Bearer $ADMIN_API_KEY"
+```
+
+Nếu `ADMIN_API_KEY` chưa đặt, endpoint trả `503` và bị vô hiệu hóa.
+
 Xem danh sách tài liệu của user:
 
 ```bash
@@ -288,3 +312,10 @@ cũ và `.xlsx` chưa hỗ trợ trong MVP này.
   (`visitor_<PSID>` / `visitor_<chat_id>`) nên mỗi người dùng luôn map về cùng
   một visitor/room.
 - Chỉ xử lý **tin nhắn text** ở bản demo này.
+- Telegram text được gửi plain text, không đặt `parse_mode`; Markdown Rocket.Chat
+  có thể hiển thị dạng raw trên Telegram. Đây là lựa chọn có chủ đích để tránh
+  lỗi escape.
+- Giới hạn đã biết: tải xuống media mặc định 20MB; voice có thể khác nhau giữa
+  trình duyệt (đặc biệt Safari); sticker động hiện chưa được chuyển như sticker.
+- `npm test` dùng mock/local server, không thay thế smoke test với Telegram và
+  Rocket.Chat thật. Checklist nằm ở [scripts/smoke.md](scripts/smoke.md).
