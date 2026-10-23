@@ -24,6 +24,7 @@ const ai = require('./ai');
 const documents = require('./documents');
 const { CHANNELS, DEFAULTS, ENV } = require('./constants/config');
 const { MESSAGES } = require('./constants/messages');
+const { dumpRocketChatMessage } = require('./debugDump');
 
 
 const PORT = ENV.port;
@@ -335,6 +336,12 @@ async function pollAgentMessages() {
       );
 
       for (const msg of newMessages) {
+        try {
+          dumpRocketChatMessage(msg);
+        } catch (err) {
+          console.warn('[poll] Failed to dump message payload:', err.message);
+        }
+
         const text = msg.msg;
         const ts = new Date(msg.ts).getTime();
         if (!text || text === 'connected') {

@@ -4,3 +4,6 @@ mapping.json
 handoff-rc-omnichannel-bridge.md
 data/
 npm-debug.log*
+debug-dumps/
+before-after.md
+CODEBASE_AUDIT_REPORT.md

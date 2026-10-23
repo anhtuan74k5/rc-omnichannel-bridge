@@ -13,6 +13,7 @@
 const mapping = require('./mapping');
 const { API, ENV, FILES, HEADERS, MIME_TYPES } = require('./constants/config');
 const { ERRORS } = require('./constants/errors');
+const { dumpRocketChatMessage } = require('./debugDump');
 
 const ROCKETCHAT_URL = ENV.rocketchatUrl.replace(/\/+$/, '');
 
@@ -255,6 +256,13 @@ async function pollNewAgentMessages(roomId, visitorToken, lastMessageTimestamp) 
   const body = await rcFetch(url);
 
   const messages = (body && body.messages) || [];
+  for (const message of messages) {
+    try {
+      dumpRocketChatMessage(message);
+    } catch (err) {
+      console.warn('[rocketchat] Failed to dump message payload:', err.message);
+    }
+  }
   const newMessages = messages
     .filter((m) => {
       const ts = new Date(m.ts).getTime();

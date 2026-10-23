@@ -99,6 +99,7 @@ const ENV = Object.freeze({
   facebookPageAccessToken: process.env.FB_PAGE_ACCESS_TOKEN || '',
   facebookVerifyToken: process.env.FB_VERIFY_TOKEN || '',
   debugPolling: process.env.DEBUG_POLLING === 'true',
+  debugDumpPayloads: process.env.DEBUG_DUMP_PAYLOADS === 'true',
   telegramMaxDocumentBytes: Number(
     process.env.TELEGRAM_MAX_DOCUMENT_BYTES || DEFAULTS.telegramMaxDocumentBytes
   ),

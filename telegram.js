@@ -9,6 +9,7 @@
 
 const { API, DOCUMENT_EXTENSIONS, ENV, FILES, HEADERS, MIME_TYPES, TELEGRAM_MESSAGE_TYPES } = require('./constants/config');
 const { ERRORS } = require('./constants/errors');
+const { dumpTelegramUpdate } = require('./debugDump');
 let lastUpdateId = 0;
 
 function getExtension(filename) {
@@ -28,6 +29,12 @@ function getMessageType(message) {
  * @param {function} onMessage - async (chatId, text) => void
  */
 async function handleWebhook(body, onMessage, onDocument, onUnsupportedMessage) {
+  try {
+    dumpTelegramUpdate(body);
+  } catch (err) {
+    console.warn('[telegram] Failed to dump update payload:', err.message);
+  }
+
   const message = body.message || body.edited_message;
 
   if (!message) {
