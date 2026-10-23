@@ -17,6 +17,16 @@ function resolveUrl(urlOrPath) {
   return `${ROCKETCHAT_URL}/${value.replace(/^\/+/, '')}`;
 }
 
+function isPermanentDownloadError(error) {
+  return [
+    'ROCKETCHAT_FILE_UNAUTHORIZED',
+    'ROCKETCHAT_FILE_FORBIDDEN',
+    'ROCKETCHAT_FILE_NOT_FOUND',
+    'ROCKETCHAT_FILE_TOO_LARGE',
+    'ROCKETCHAT_FILE_CONTENT_LENGTH_INVALID',
+  ].includes(error && error.code);
+}
+
 async function downloadRocketChatFile(urlOrPath) {
   const { authToken, userId } = await loginAgent();
   const response = await fetchWithTimeout(resolveUrl(urlOrPath), {
@@ -60,4 +70,4 @@ async function downloadRocketChatFile(urlOrPath) {
   };
 }
 
-module.exports = { downloadRocketChatFile };
+module.exports = { downloadRocketChatFile, isPermanentDownloadError };

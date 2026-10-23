@@ -25,6 +25,7 @@ const documents = require('./documents');
 const { CHANNELS, DEFAULTS, ENV } = require('./constants/config');
 const { MESSAGES } = require('./constants/messages');
 const { dumpRocketChatMessage } = require('./debugDump');
+const { downloadRocketChatFile, isPermanentDownloadError } = require('./media/rocketchatFiles');
 
 
 const PORT = ENV.port;
@@ -37,9 +38,11 @@ const app = express();
 app.use(express.json({ limit: ENV.requestBodyLimit }));
 
 let telegramPollingInProgress = false;
+let agentPollingInProgress = false;
 const messageRetryCounts = new Map();
 const MAX_PROCESSED_MESSAGE_IDS = 200;
 const roomEnsureMutexes = new Map();
+const completedAttachmentKeys = new Map();
 
 // ============================================================
 // Shared handler: incoming platform message -> Rocket.Chat
@@ -338,6 +341,10 @@ async function pollTelegramUpdates() {
 }
 
 async function pollAgentMessages() {
+  if (agentPollingInProgress) return;
+  agentPollingInProgress = true;
+
+  try {
   const entries = mapping.getActiveEntries().filter((entry) => entry.roomId && entry.visitorToken);
   if (entries.length === 0) return;
 
@@ -361,6 +368,54 @@ async function pollAgentMessages() {
         const ts = new Date(msg.ts).getTime();
         const messageId = msg._id;
         const retryKey = `${entry.platform}:${entry.platformUserId}:${messageId || `${ts}:${text || ''}`}`;
+        const attachments = rocketchat.extractAttachments(msg);
+        const completed = completedAttachmentKeys.get(retryKey) || new Set();
+        const pendingAttachments = attachments.filter((attachment) => !completed.has(attachment.source));
+
+        if (entry.platform === 'telegram' && attachments.length > 0 && text !== 'connected') {
+          let attachmentFailed = false;
+          for (const attachment of pendingAttachments) {
+            const attachmentRetryKey = `${retryKey}:${attachment.source}`;
+            try {
+              const downloaded = await downloadRocketChatFile(attachment.source);
+              await telegram.sendMedia(entry.platformUserId, {
+                ...attachment,
+                buffer: downloaded.buffer,
+                mimeType: downloaded.mimeType || attachment.mimeType,
+                filename: downloaded.filename || attachment.filename,
+                size: downloaded.buffer.length,
+              }, completed.size === 0 ? text : '');
+              completed.add(attachment.source);
+              messageRetryCounts.delete(attachmentRetryKey);
+            } catch (err) {
+              console.error(`[poll] Failed to forward attachment ${attachment.filename} to Telegram:`, err.message);
+              const permanent = isPermanentDownloadError(err);
+              const retries = (messageRetryCounts.get(attachmentRetryKey) || 0) + 1;
+              if (permanent || retries >= ENV.rocketChatMaxMessageRetries) {
+                completed.add(attachment.source);
+                messageRetryCounts.delete(attachmentRetryKey);
+              } else {
+                messageRetryCounts.set(attachmentRetryKey, retries);
+                attachmentFailed = true;
+              }
+              try {
+                await telegram.sendMessage(entry.platformUserId, MESSAGES.telegram.mediaDeliveryFailed);
+              } catch (noticeErr) {
+                console.error('[poll] Failed to send attachment error notice:', noticeErr.message);
+              }
+              if (attachmentFailed) break;
+            }
+          }
+          if (attachmentFailed) {
+            completedAttachmentKeys.set(retryKey, completed);
+            continue;
+          }
+          completedAttachmentKeys.delete(retryKey);
+          messageRetryCounts.delete(retryKey);
+          markMessageProcessed(entry, messageId, ts);
+          continue;
+        }
+
         if (!text || text === 'connected') {
           markMessageProcessed(entry, messageId, ts);
           continue;
@@ -407,6 +462,9 @@ async function pollAgentMessages() {
         processedMessageIds: entry.processedMessageIds,
       });
     }
+  }
+  } finally {
+    agentPollingInProgress = false;
   }
 }
 

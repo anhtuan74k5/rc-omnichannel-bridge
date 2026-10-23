@@ -16,6 +16,7 @@ const { ERRORS } = require('./constants/errors');
 const { dumpRocketChatMessage } = require('./debugDump');
 const { fetchWithTimeout } = require('./httpClient');
 const { log } = require('./logger');
+const { classifyMime } = require('./media/mime');
 
 const ROCKETCHAT_URL = ENV.rocketchatUrl.replace(/\/+$/, '');
 
@@ -264,6 +265,80 @@ async function uploadLivechatFile(visitorToken, roomId, { filename, buffer, mime
 }
 
 /**
+ * Extract unique attachment descriptors from a captured messages.history item.
+ * The descriptor does not contain a downloaded buffer.
+ *
+ * @param {object} message
+ * @returns {Array<import('./media/types').MediaDescriptor>}
+ */
+function extractAttachments(message) {
+  const fileUpload = message && message.fileUpload;
+  const candidates = [];
+  const file = message && message.file;
+  const files = Array.isArray(message && message.files) ? message.files : [];
+  const attachments = Array.isArray(message && message.attachments) ? message.attachments : [];
+
+  if (file) candidates.push({
+    id: file._id,
+    filename: file.name,
+    mimeType: file.type,
+    size: file.size,
+    source: fileUpload && fileUpload.publicFilePath,
+  });
+  for (const item of files) candidates.push({
+    id: item && item._id,
+    filename: item && item.name,
+    mimeType: item && item.type,
+    size: item && item.size,
+    source: fileUpload && fileUpload.publicFilePath,
+  });
+  for (const item of attachments) candidates.push({
+    id: item && item.fileId,
+    filename: item && item.title,
+    mimeType: item && item.mimeType,
+    size: item && item.size,
+    source: item && item.title_link,
+  });
+
+  const seen = new Set();
+  const normalizeSource = (source) => {
+    try {
+      const parsed = new URL(source, ROCKETCHAT_URL || 'http://localhost');
+      return parsed.pathname;
+    } catch {
+      return String(source || '');
+    }
+  };
+  return candidates
+    .map((candidate) => {
+      const source = String(candidate.source || '');
+      const filename = candidate.filename || source.split(/[\\/]/).pop() || 'download';
+      const mimeType = candidate.mimeType || '';
+      const identities = [
+        candidate.id && `id:${candidate.id}`,
+        source && `source:${normalizeSource(source)}`,
+        `file:${filename}:${mimeType}:${candidate.size || ''}`,
+      ].filter(Boolean);
+      return {
+        identities,
+        descriptor: {
+          kind: classifyMime(mimeType, filename),
+          filename,
+          mimeType,
+          size: Number(candidate.size || 0),
+          source,
+        },
+      };
+    })
+    .filter(({ identities, descriptor }) => {
+      if (!descriptor.source || identities.some((identity) => seen.has(identity))) return false;
+      identities.forEach((identity) => seen.add(identity));
+      return true;
+    })
+    .map(({ descriptor }) => descriptor);
+}
+
+/**
  * pollNewAgentMessages(roomId, visitorToken, lastMessageTimestamp)
  * ----------------------------------------------------------------
  * GET /api/v1/livechat/messages.history/{roomId}?token=...
@@ -284,6 +359,7 @@ async function pollNewAgentMessages(roomId, visitorToken, lastMessageTimestamp, 
       if (m._id && processedMessageIds.includes(m._id)) return false;
       // Only messages NOT sent by the visitor (i.e. from the agent).
       if (m.token === visitorToken) return false;
+      if (m.t) return false;
       try {
         dumpRocketChatMessage(m);
       } catch (err) {
@@ -304,6 +380,7 @@ module.exports = {
   loginAgent,
   getOrCreateVisitor,
   getOrCreateRoom,
+  extractAttachments,
   uploadLivechatFile,
   sendMessageToRocketChat,
   pollNewAgentMessages,

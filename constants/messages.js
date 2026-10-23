@@ -118,6 +118,7 @@ or
     unsupportedMessage: 'I received your content, but the bot currently reads only text messages and PDF/DOCX/text documents. A support agent can view this notice in the system.',
     uploadedDocumentStatus: (filename, mimeType, size, chunks) =>
       `📎 Telegram uploaded document: ${filename} (${mimeType}, ${size}). Indexed for AI with ${chunks} chunk(s), but the Rocket.Chat file upload did not complete.`,
+    mediaDeliveryFailed: 'Sorry, I could not deliver one of the support files right now. Please try again later.',
   },
   liveLookup: {
     weatherLocationPrompt: 'Which location would you like the weather for? For example: "What is the weather like in Hanoi today?"',
