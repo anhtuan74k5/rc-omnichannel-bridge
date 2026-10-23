@@ -13,6 +13,16 @@ const { dumpTelegramUpdate } = require('./debugDump');
 const { fetchWithTimeout } = require('./httpClient');
 const { log } = require('./logger');
 let lastUpdateId = 0;
+const processedUpdateIds = new Set();
+const updateRetryCounts = new Map();
+const MAX_PROCESSED_UPDATE_IDS = 1000;
+
+function rememberProcessedUpdate(updateId) {
+  processedUpdateIds.add(updateId);
+  while (processedUpdateIds.size > MAX_PROCESSED_UPDATE_IDS) {
+    processedUpdateIds.delete(processedUpdateIds.values().next().value);
+  }
+}
 
 function getExtension(filename) {
   const match = String(filename || '').toLowerCase().match(/\.[^.]+$/);
@@ -91,8 +101,38 @@ async function pollUpdates(onMessage, onDocument, onUnsupportedMessage) {
   }
 
   for (const update of data.result || []) {
-    lastUpdateId = Math.max(lastUpdateId, update.update_id);
-    await handleWebhook(update, onMessage, onDocument, onUnsupportedMessage);
+    const updateId = update.update_id;
+    if (processedUpdateIds.has(updateId) || updateId <= lastUpdateId) {
+      continue;
+    }
+
+    try {
+      await handleWebhook(update, onMessage, onDocument, onUnsupportedMessage);
+      rememberProcessedUpdate(updateId);
+      updateRetryCounts.delete(updateId);
+      lastUpdateId = updateId;
+    } catch (err) {
+      const retries = (updateRetryCounts.get(updateId) || 0) + 1;
+      updateRetryCounts.set(updateId, retries);
+      if (retries < ENV.telegramMaxUpdateRetries) {
+        log.warn('[telegram] Update handling failed; retaining offset for retry', {
+          updateId,
+          attempt: retries,
+          error: err.message,
+        });
+        break;
+      }
+
+      log.error('[telegram] Update exceeded retry limit; skipping update', {
+        updateId,
+        attempts: retries,
+        error: err.message,
+      });
+      rememberProcessedUpdate(updateId);
+      updateRetryCounts.delete(updateId);
+      lastUpdateId = updateId;
+      break;
+    }
   }
 }
 

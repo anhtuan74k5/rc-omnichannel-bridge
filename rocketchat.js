@@ -22,6 +22,17 @@ const ROCKETCHAT_URL = ENV.rocketchatUrl.replace(/\/+$/, '');
 
 // Cached agent session
 let agentSession = null; // { authToken, userId, expiresAt }
+const visitorMutexes = new Map();
+const roomMutexes = new Map();
+
+function withMutex(mutexes, key, task) {
+  const previous = mutexes.get(key) || Promise.resolve();
+  const current = previous.then(task, task);
+  mutexes.set(key, current);
+  return current.finally(() => {
+    if (mutexes.get(key) === current) mutexes.delete(key);
+  });
+}
 
 /**
  * Low-level fetch wrapper that adds the agent auth headers and handles
@@ -125,35 +136,38 @@ async function loginAgent() {
  * Rocket.Chat, POST /api/v1/livechat/visitor is called.
  */
 async function getOrCreateVisitor(platformUserId, name, department) {
-  // Deterministic token derived from the platform user id.
-  const visitorToken = `visitor_${platformUserId}`;
+  const key = String(platformUserId);
+  return withMutex(visitorMutexes, key, async () => {
+    // Deterministic token derived from the platform user id.
+    const visitorToken = `visitor_${platformUserId}`;
 
-  // Check if we already created this visitor on Rocket.Chat.
-  const existing = mapping.findByVisitorToken(visitorToken);
-  if (existing && existing.visitorToken) {
-    log.info('[rocketchat] Visitor already exists', { visitorToken });
+    // Check if we already created this visitor on Rocket.Chat.
+    const existing = mapping.findByVisitorToken(visitorToken);
+    if (existing && existing.visitorToken) {
+      log.info('[rocketchat] Visitor already exists', { visitorToken });
+      return visitorToken;
+    }
+
+    log.info('[rocketchat] Creating visitor', { platformUserId, nameLength: String(name || '').length });
+    const body = await rcFetch(API.rocketChat.visitorPath, {
+      method: 'POST',
+      body: JSON.stringify({
+        visitor: {
+          token: visitorToken,
+          name: name || `Visitor ${platformUserId}`,
+          email: `${platformUserId}@bridge.local`,
+          department: department || ENV.departmentId || undefined,
+        },
+      }),
+    });
+
+    if (!body || !body.success) {
+      throw new Error(ERRORS.rocketchat.visitorFailed(body));
+    }
+
+    log.info('[rocketchat] Visitor created', { visitorToken });
     return visitorToken;
-  }
-
-  log.info('[rocketchat] Creating visitor', { platformUserId, nameLength: String(name || '').length });
-  const body = await rcFetch(API.rocketChat.visitorPath, {
-    method: 'POST',
-    body: JSON.stringify({
-      visitor: {
-        token: visitorToken,
-        name: name || `Visitor ${platformUserId}`,
-        email: `${platformUserId}@bridge.local`,
-        department: department || ENV.departmentId || undefined,
-      },
-    }),
   });
-
-  if (!body || !body.success) {
-    throw new Error(ERRORS.rocketchat.visitorFailed(body));
-  }
-
-  log.info('[rocketchat] Visitor created', { visitorToken });
-  return visitorToken;
 }
 
 /**
@@ -163,26 +177,28 @@ async function getOrCreateVisitor(platformUserId, name, department) {
  * room for a visitor. Returns the room id.
  */
 async function getOrCreateRoom(visitorToken) {
-  const existing = mapping.findByVisitorToken(visitorToken);
-  if (existing && existing.roomId) {
-    log.info('[rocketchat] Room already known', { visitorToken, roomId: existing.roomId });
-    return existing.roomId;
-  }
+  return withMutex(roomMutexes, String(visitorToken), async () => {
+    const existing = mapping.findByVisitorToken(visitorToken);
+    if (existing && existing.roomId) {
+      log.info('[rocketchat] Room already known', { visitorToken, roomId: existing.roomId });
+      return existing.roomId;
+    }
 
-  log.info('[rocketchat] Fetching room', { visitorToken });
-  const body = await rcFetch(`${API.rocketChat.roomPath}?token=${encodeURIComponent(visitorToken)}`);
+    log.info('[rocketchat] Fetching room', { visitorToken });
+    const body = await rcFetch(`${API.rocketChat.roomPath}?token=${encodeURIComponent(visitorToken)}`);
 
-  if (!body || !body.room || !body.room._id) {
-    throw new Error(ERRORS.rocketchat.roomFailed(body));
-  }
+    if (!body || !body.room || !body.room._id) {
+      throw new Error(ERRORS.rocketchat.roomFailed(body));
+    }
 
-  const roomId = body.room._id;
-  log.info('[rocketchat] Room resolved', { roomId });
+    const roomId = body.room._id;
+    log.info('[rocketchat] Room resolved', { roomId });
 
-  if (existing) {
-    mapping.update(existing, { roomId });
-  }
-  return roomId;
+    if (existing) {
+      mapping.update(existing, { roomId });
+    }
+    return roomId;
+  });
 }
 
 /**
@@ -255,7 +271,7 @@ async function uploadLivechatFile(visitorToken, roomId, { filename, buffer, mime
  * the visitor (i.e. messages from the agent). Returns the list of new
  * messages (oldest first).
  */
-async function pollNewAgentMessages(roomId, visitorToken, lastMessageTimestamp) {
+async function pollNewAgentMessages(roomId, visitorToken, lastMessageTimestamp, processedMessageIds = []) {
   const url = `${API.rocketChat.messagesHistoryPath}/${encodeURIComponent(roomId)}?token=${encodeURIComponent(visitorToken)}`;
   const body = await rcFetch(url);
 
@@ -263,8 +279,9 @@ async function pollNewAgentMessages(roomId, visitorToken, lastMessageTimestamp) 
   const newMessages = messages
     .filter((m) => {
       const ts = new Date(m.ts).getTime();
-      // Only messages newer than the last seen timestamp.
-      if (ts <= lastMessageTimestamp) return false;
+      // Timestamp is a coarse filter; message ids disambiguate equal timestamps.
+      if (ts < lastMessageTimestamp) return false;
+      if (m._id && processedMessageIds.includes(m._id)) return false;
       // Only messages NOT sent by the visitor (i.e. from the agent).
       if (m.token === visitorToken) return false;
       try {

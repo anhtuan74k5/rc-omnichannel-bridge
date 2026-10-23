@@ -37,6 +37,9 @@ const app = express();
 app.use(express.json({ limit: ENV.requestBodyLimit }));
 
 let telegramPollingInProgress = false;
+const messageRetryCounts = new Map();
+const MAX_PROCESSED_MESSAGE_IDS = 200;
+const roomEnsureMutexes = new Map();
 
 // ============================================================
 // Shared handler: incoming platform message -> Rocket.Chat
@@ -61,14 +64,25 @@ async function sendReplyToPlatform(platform, platformUserId, text) {
 }
 
 async function ensureRocketChatRoom(platform, platformUserId, name) {
-  const entry = mapping.getOrCreate(platform, platformUserId);
-  const visitorToken = await rocketchat.getOrCreateVisitor(platformUserId, name);
-  mapping.update(entry, { visitorToken });
+  const key = `${platform}:${String(platformUserId)}`;
+  const previous = roomEnsureMutexes.get(key) || Promise.resolve();
+  const task = async () => {
+    const entry = mapping.getOrCreate(platform, platformUserId);
+    const visitorToken = await rocketchat.getOrCreateVisitor(platformUserId, name);
+    mapping.update(entry, { visitorToken });
 
-  const roomId = await rocketchat.getOrCreateRoom(visitorToken);
-  mapping.update(entry, { roomId });
+    const roomId = await rocketchat.getOrCreateRoom(visitorToken);
+    mapping.update(entry, { roomId });
 
-  return { entry, visitorToken, roomId };
+    return { entry, visitorToken, roomId };
+  };
+  const current = previous.then(task, task);
+  roomEnsureMutexes.set(key, current);
+  try {
+    return await current;
+  } finally {
+    if (roomEnsureMutexes.get(key) === current) roomEnsureMutexes.delete(key);
+  }
 }
 
 async function handleTelegramDocument(chatId, document, caption) {
@@ -332,7 +346,8 @@ async function pollAgentMessages() {
       const newMessages = await rocketchat.pollNewAgentMessages(
         entry.roomId,
         entry.visitorToken,
-        entry.lastMessageTimestamp
+        entry.lastMessageTimestamp,
+        entry.processedMessageIds || []
       );
 
       for (const msg of newMessages) {
@@ -344,8 +359,10 @@ async function pollAgentMessages() {
 
         const text = msg.msg;
         const ts = new Date(msg.ts).getTime();
+        const messageId = msg._id;
+        const retryKey = `${entry.platform}:${entry.platformUserId}:${messageId || `${ts}:${text || ''}`}`;
         if (!text || text === 'connected') {
-          mapping.update(entry, { lastMessageTimestamp: Math.max(entry.lastMessageTimestamp, ts) });
+          markMessageProcessed(entry, messageId, ts);
           continue;
         }
 
@@ -359,15 +376,36 @@ async function pollAgentMessages() {
           } else if (entry.platform === 'telegram') {
             await telegram.sendMessage(entry.platformUserId, text);
           }
+          messageRetryCounts.delete(retryKey);
+          markMessageProcessed(entry, messageId, ts);
         } catch (err) {
           console.error(`[poll] Failed to forward message ${msg._id} to ${entry.platform}:`, err.message);
+          const retries = (messageRetryCounts.get(retryKey) || 0) + 1;
+          messageRetryCounts.set(retryKey, retries);
+          if (retries >= ENV.rocketChatMaxMessageRetries) {
+            console.error(`[poll] Giving up on message ${msg._id} after ${retries} attempts.`);
+            messageRetryCounts.delete(retryKey);
+            markMessageProcessed(entry, messageId, ts);
+          } else {
+            break;
+          }
         }
-
-        // Update last seen timestamp so we don't re-send this message.
-        mapping.update(entry, { lastMessageTimestamp: Math.max(entry.lastMessageTimestamp, ts) });
       }
     } catch (err) {
       console.error(`[poll] Error polling room ${entry.roomId}:`, err.message);
+    }
+
+    function markMessageProcessed(entry, messageId, timestamp) {
+      const processedMessageIds = Array.isArray(entry.processedMessageIds)
+        ? entry.processedMessageIds.filter((id) => id !== messageId)
+        : [];
+      if (messageId) processedMessageIds.push(messageId);
+      entry.processedMessageIds = processedMessageIds.slice(-MAX_PROCESSED_MESSAGE_IDS);
+      entry.lastMessageTimestamp = Math.max(entry.lastMessageTimestamp || 0, timestamp);
+      mapping.update(entry, {
+        lastMessageTimestamp: entry.lastMessageTimestamp,
+        processedMessageIds: entry.processedMessageIds,
+      });
     }
   }
 }

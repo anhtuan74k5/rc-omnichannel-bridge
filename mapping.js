@@ -33,6 +33,9 @@ function load() {
       const raw = fs.readFileSync(MAPPING_FILE, 'utf8');
       store = JSON.parse(raw);
       if (!Array.isArray(store.entries)) store.entries = [];
+      store.entries.forEach((entry) => {
+        if (!Array.isArray(entry.processedMessageIds)) entry.processedMessageIds = [];
+      });
       console.log(`[mapping] Loaded ${store.entries.length} mapping entries from ${MAPPING_FILE}`);
     } else {
       store = { entries: [] };
@@ -45,10 +48,18 @@ function load() {
 }
 
 function save() {
+  const tempFile = `${MAPPING_FILE}.${process.pid}.tmp`;
   try {
-    fs.writeFileSync(MAPPING_FILE, JSON.stringify(store, null, 2), 'utf8');
+    fs.writeFileSync(tempFile, JSON.stringify(store, null, 2), 'utf8');
+    fs.renameSync(tempFile, MAPPING_FILE);
   } catch (err) {
+    try {
+      if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+    } catch (cleanupErr) {
+      console.error('[mapping] Failed to clean up temporary mapping file:', cleanupErr.message);
+    }
     console.error('[mapping] Failed to save mapping file:', err.message);
+    throw err;
   }
 }
 
@@ -88,6 +99,7 @@ function getOrCreate(platform, platformUserId) {
     visitorToken: null,
     roomId: null,
     lastMessageTimestamp: 0,
+    processedMessageIds: [],
     active: true,
   };
   store.entries.push(entry);
