@@ -256,13 +256,6 @@ async function pollNewAgentMessages(roomId, visitorToken, lastMessageTimestamp) 
   const body = await rcFetch(url);
 
   const messages = (body && body.messages) || [];
-  for (const message of messages) {
-    try {
-      dumpRocketChatMessage(message);
-    } catch (err) {
-      console.warn('[rocketchat] Failed to dump message payload:', err.message);
-    }
-  }
   const newMessages = messages
     .filter((m) => {
       const ts = new Date(m.ts).getTime();
@@ -270,6 +263,11 @@ async function pollNewAgentMessages(roomId, visitorToken, lastMessageTimestamp) 
       if (ts <= lastMessageTimestamp) return false;
       // Only messages NOT sent by the visitor (i.e. from the agent).
       if (m.token === visitorToken) return false;
+      try {
+        dumpRocketChatMessage(m);
+      } catch (err) {
+        console.warn('[rocketchat] Failed to dump message payload:', err.message);
+      }
       return true;
     })
     .sort((a, b) => new Date(a.ts) - new Date(b.ts));

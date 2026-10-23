@@ -5,6 +5,8 @@ const { ENV } = require('./constants/config');
 
 const DEBUG_DUMPS_DIR = path.join(__dirname, 'debug-dumps');
 const ROCKETCHAT_MEDIA_FIELDS = new Set(['file', 'files', 'attachments', 'fileUpload', 't']);
+const dumpedIds = new Set();
+const MAX_DUMPED_IDS = 5000;
 const TELEGRAM_MEDIA_FIELDS = [
   'photo',
   'video',
@@ -46,14 +48,25 @@ function dumpRocketChatMessage(message) {
     return false;
   }
 
+  const messageId = message._id;
+  if (messageId && dumpedIds.has(messageId)) {
+    return false;
+  }
+
   const hasMediaField = Object.keys(message).some((field) => ROCKETCHAT_MEDIA_FIELDS.has(field));
   if (!hasMediaField) {
     return false;
   }
 
   const timestamp = Date.now();
-  const messageId = String(message._id || timestamp).replace(/[^a-zA-Z0-9._-]/g, '_');
-  writeDump(`${timestamp}-${messageId}.json`, message);
+  const filenameId = String(messageId || timestamp).replace(/[^a-zA-Z0-9._-]/g, '_');
+  writeDump(`${timestamp}-${filenameId}.json`, message);
+  if (messageId) {
+    dumpedIds.add(messageId);
+    if (dumpedIds.size > MAX_DUMPED_IDS) {
+      dumpedIds.delete(dumpedIds.values().next().value);
+    }
+  }
   return true;
 }
 
