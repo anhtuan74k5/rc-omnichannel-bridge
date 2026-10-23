@@ -18,6 +18,7 @@ const DEFAULTS = Object.freeze({
   documentSummaryTopK: 8,
   httpTimeoutMs: 15000,
   httpUploadTimeoutMs: 120000,
+  maxOutboundMediaBytes: 50 * 1024 * 1024,
   telegramMaxUpdateRetries: 3,
   rocketChatMaxMessageRetries: 3,
 });
@@ -126,6 +127,9 @@ const ENV = Object.freeze({
   documentSummaryTopK: Number(process.env.DOCUMENT_SUMMARY_TOP_K || DEFAULTS.documentSummaryTopK),
   httpTimeoutMs: Number(process.env.HTTP_TIMEOUT_MS || DEFAULTS.httpTimeoutMs),
   httpUploadTimeoutMs: Number(process.env.HTTP_UPLOAD_TIMEOUT_MS || DEFAULTS.httpUploadTimeoutMs),
+  maxOutboundMediaBytes: Number(
+    process.env.MAX_OUTBOUND_MEDIA_BYTES || DEFAULTS.maxOutboundMediaBytes
+  ),
   telegramMaxUpdateRetries: Math.max(
     1,
     Number(process.env.TELEGRAM_MAX_UPDATE_RETRIES || DEFAULTS.telegramMaxUpdateRetries)

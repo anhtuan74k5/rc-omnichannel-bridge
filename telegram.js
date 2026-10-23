@@ -204,9 +204,87 @@ async function sendMessage(chatId, text) {
   return data;
 }
 
+function mediaError(status, data) {
+  const error = new Error(ERRORS.telegram.sendFailed(status, data));
+  error.status = status;
+  return error;
+}
+
+async function sendTelegramMedia(method, field, chatId, descriptor, caption) {
+  if (!descriptor || !Buffer.isBuffer(descriptor.buffer) || descriptor.buffer.length === 0) {
+    throw new Error(ERRORS.telegram.mediaInvalidBuffer);
+  }
+  const url = `${API.telegram.baseUrl}/bot${ENV.telegramBotToken}/${method}`;
+  const form = new FormData();
+  form.append('chat_id', String(chatId));
+  const captionText = String(caption || '');
+  if (captionText) form.append('caption', captionText.slice(0, 1024));
+  form.append(field, new Blob([descriptor.buffer], {
+    type: descriptor.mimeType || MIME_TYPES.octetStream,
+  }), descriptor.filename || FILES.defaultUpload);
+
+  const res = await fetchWithTimeout(url, {
+    method: 'POST',
+    body: form,
+  }, { timeoutMs: ENV.httpUploadTimeoutMs, retries: 0 });
+  const data = await res.json();
+  if (!res.ok || !data.ok) throw mediaError(res.status, data);
+  return data;
+}
+
+async function sendMediaPart(method, field, chatId, descriptor, caption) {
+  const result = await sendTelegramMedia(method, field, chatId, descriptor, caption);
+  const remainder = String(caption || '').slice(1024);
+  if (remainder) await sendMessage(chatId, remainder);
+  return result;
+}
+
+async function sendPhoto(chatId, descriptor, caption) {
+  try {
+    return await sendMediaPart('sendPhoto', 'photo', chatId, descriptor, caption);
+  } catch (error) {
+    if (error.status !== 400) throw error;
+    return sendMediaPart('sendDocument', 'document', chatId, descriptor, caption);
+  }
+}
+
+async function sendDocument(chatId, descriptor, caption) {
+  return sendMediaPart('sendDocument', 'document', chatId, descriptor, caption);
+}
+
+async function sendVideo(chatId, descriptor, caption) {
+  return sendMediaPart('sendVideo', 'video', chatId, descriptor, caption);
+}
+
+async function sendAudio(chatId, descriptor, caption) {
+  return sendMediaPart('sendAudio', 'audio', chatId, descriptor, caption);
+}
+
+async function sendVoice(chatId, descriptor, caption) {
+  return sendMediaPart('sendVoice', 'voice', chatId, descriptor, caption);
+}
+
+async function sendAnimation(chatId, descriptor, caption) {
+  return sendMediaPart('sendAnimation', 'animation', chatId, descriptor, caption);
+}
+
+async function sendMedia(chatId, descriptor, caption) {
+  const senders = { image: sendPhoto, animation: sendAnimation, document: sendDocument,
+    video: sendVideo, audio: sendAudio, voice: sendVoice };
+  const sender = senders[descriptor && descriptor.kind] || sendDocument;
+  return sender(chatId, descriptor, caption);
+}
+
 module.exports = {
   downloadDocument,
   handleWebhook,
   pollUpdates,
+  sendAnimation,
+  sendAudio,
+  sendDocument,
   sendMessage,
+  sendMedia,
+  sendPhoto,
+  sendVideo,
+  sendVoice,
 };
