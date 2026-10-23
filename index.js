@@ -31,7 +31,7 @@ const { downloadTelegramFile, isTelegramFileTooLarge } = require('./media/telegr
 
 
 const PORT = ENV.port;
-const POLL_INTERVAL_MS = DEFAULTS.pollingIntervalMs;
+const POLL_INTERVAL_MS = ENV.rocketChatPollIntervalMs;
 const TELEGRAM_POLLING_ENABLED = ENV.telegramPollingEnabled;
 const TELEGRAM_POLL_INTERVAL_MS = ENV.telegramPollIntervalMs;
 const AI_HANDOFF_MESSAGE = ENV.aiHandoffMessage || MESSAGES.ai.handoffDefault;
@@ -41,6 +41,7 @@ app.use(express.json({ limit: ENV.requestBodyLimit }));
 
 let telegramPollingInProgress = false;
 let agentPollingInProgress = false;
+let rocketChatPollingNotBefore = 0;
 const messageRetryCounts = new Map();
 const MAX_PROCESSED_MESSAGE_IDS = 200;
 const roomEnsureMutexes = new Map();
@@ -437,6 +438,7 @@ async function pollTelegramUpdates() {
 
 async function pollAgentMessages() {
   if (agentPollingInProgress) return;
+  if (Date.now() < rocketChatPollingNotBefore) return;
   agentPollingInProgress = true;
 
   try {
@@ -543,6 +545,17 @@ async function pollAgentMessages() {
       }
     } catch (err) {
       console.error(`[poll] Error polling room ${entry.roomId}:`, err.message);
+      if (err.status === 429) {
+        const retryAfterSeconds = Number(
+          String(err.body && err.body.error || err.message).match(/wait\s+(\d+)\s+seconds?/i)?.[1]
+        );
+        const cooldownMs = (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+          ? retryAfterSeconds
+          : 10) * 1000;
+        rocketChatPollingNotBefore = Date.now() + cooldownMs;
+        console.warn(`[poll] Rocket.Chat rate limit reached; pausing polling for ${Math.ceil(cooldownMs / 1000)}s.`);
+        break;
+      }
     }
 
     function markMessageProcessed(entry, messageId, timestamp) {

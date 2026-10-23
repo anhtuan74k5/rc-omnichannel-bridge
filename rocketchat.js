@@ -57,6 +57,7 @@ async function rcFetch(path, options = {}, retried = false) {
 
   const res = await fetchWithTimeout(url, { ...options, headers }, {
     retries: options.method && options.method.toUpperCase() === 'GET' ? 2 : 0,
+    retryOn: (status) => status >= 500,
   });
 
   // If token expired / unauthorized, re-login and retry once.

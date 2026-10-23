@@ -5,7 +5,7 @@ const CHANNELS = Object.freeze({
 
 const DEFAULTS = Object.freeze({
   port: 3000,
-  pollingIntervalMs: 3000,
+  pollingIntervalMs: 10000,
   telegramPollIntervalMs: 2000,
   requestBodyLimit: '2mb',
   telegramMaxDocumentBytes: 100 * 1024 * 1024,
@@ -22,6 +22,7 @@ const DEFAULTS = Object.freeze({
   maxOutboundMediaBytes: 50 * 1024 * 1024,
   telegramMaxUpdateRetries: 3,
   rocketChatMaxMessageRetries: 3,
+  rocketChatPollIntervalMs: 10000,
   telegramWebhookPath: '/webhook/telegram',
 });
 
@@ -149,6 +150,10 @@ const ENV = Object.freeze({
   rocketChatMaxMessageRetries: Math.max(
     1,
     Number(process.env.ROCKETCHAT_MAX_MESSAGE_RETRIES || DEFAULTS.rocketChatMaxMessageRetries)
+  ),
+  rocketChatPollIntervalMs: Math.max(
+    10000,
+    Number(process.env.ROCKETCHAT_POLL_INTERVAL_MS || DEFAULTS.rocketChatPollIntervalMs)
   ),
 });
 

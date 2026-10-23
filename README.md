@@ -1,321 +1,385 @@
-# rc-omnichannel-bridge
+# Rocket.Chat Omnichannel Bridge
 
-Bridge server (Node.js + Express) tích hợp **nhiều nền tảng nhắn tin** (hiện tại:
-**Facebook Messenger** và **Telegram**, tương lai có thể thêm Zalo/WhatsApp) vào
-**Rocket.Chat Omnichannel** — giao tiếp trực tiếp qua REST API namespace
-`/api/v1/livechat/*`, **không dùng** Marketplace app có sẵn của Rocket.Chat.
+Bridge Node.js kết nối Telegram và Facebook Messenger với Rocket.Chat
+Omnichannel qua các API Livechat `/api/v1/livechat/*`.
 
+Bridge đảm nhiệm:
 
-> ⚠️ Chỉ gọi các route `/api/v1/livechat/*`. Mọi route khác (như `/users.create`,
-> `/channels.list`) bị proxy chặn (404) nên code **không bao giờ** gọi chúng.
+- Nhận tin nhắn từ Telegram/Facebook và chuyển vào visitor room trên
+  Rocket.Chat.
+- Polling tin nhắn mới của agent từ Rocket.Chat rồi gửi ngược về đúng nền tảng.
+- Chuyển text, emoji, ảnh, file, video, voice, audio, GIF và sticker tĩnh.
+- Lưu mapping visitor/room để tiếp tục sử dụng sau khi restart.
+- Hỏi đáp bằng AI và tài liệu riêng theo từng người dùng.
+
+Facebook Messenger hiện chỉ xử lý text ở chiều nhận; luồng media chính đã được
+triển khai cho Telegram và chiều agent → Telegram.
 
 ## Kiến trúc
 
-```
-Facebook Messenger ──► POST /webhook/facebook ──┐
-                                                ├──► Rocket.Chat /api/v1/livechat/*
-Telegram Bot ────────► POST /webhook/telegram ──┘        (visitor, room, message)
-
-Rocket.Chat agent reply ──► polling (3s) ──► Facebook Graph API / Telegram Bot API
-```
-
-- **Inbound** (người dùng → Rocket.Chat): webhook nhận tin nhắn, tạo visitor +
-  room, gửi tin vào room.
-- **Outbound** (agent → người dùng): vòng lặp polling mỗi 3 giây kiểm tra tin
-  mới từ agent trong từng room, gửi ra đúng nền tảng tương ứng.
-
-## Cấu trúc project
-
-```
-.
-├── package.json      # dependencies & scripts
-├── .env.example      # mẫu biến môi trường (copy thành .env)
-├── index.js          # Express server + polling loop + routes
-├── rocketchat.js     # tích hợp Rocket.Chat livechat API
-├── facebook.js       # webhook + gửi tin Facebook Messenger
-├── telegram.js       # Telegram webhook, polling, and message delivery
-├── constants/        # shared configuration, messages, logs, and errors
-├── documents.js      # lưu/index tài liệu riêng theo từng user để AI trả lời
-├── mapping.js        # lưu mapping (visitor token, room, platform) vào mapping.json
-└── mapping.json      # (tự tạo) dữ liệu mapping persist qua restart
+```text
+Telegram Bot ────────┐
+                     ├──► Bridge Express ──► Rocket.Chat Omnichannel
+Facebook Messenger ──┘          ▲
+                                │
+             polling tin nhắn agent mỗi 10 giây
+                                │
+                    Telegram Bot API / Facebook Graph API
 ```
 
-## Cài đặt & chạy
+Các route Rocket.Chat được sử dụng chỉ thuộc namespace
+`/api/v1/livechat/*`.
 
-```bash
-# 1. Cài dependencies
+## Yêu cầu
+
+- Node.js 22 trở lên.
+- Rocket.Chat đang chạy và có tài khoản agent hoặc Personal Access Token.
+- Bot Telegram nếu dùng Telegram.
+- Facebook Page và Page Access Token nếu dùng Facebook.
+- API key tương thích OpenAI nếu bật AI.
+
+## Cài đặt
+
+```powershell
+cd D:\Github\rc-omnichannel-bridge
 npm install
+Copy-Item .env.example .env
+```
 
-# 2. Tạo file .env từ mẫu và điền đầy đủ biến
-cp .env.example .env
+Mở `.env` và điền các biến bắt buộc, sau đó khởi động:
 
-# 3. Chạy server
+```powershell
 npm start
 ```
 
-Server sẽ chạy tại `http://localhost:3000`.
+Chạy chế độ tự khởi động lại khi phát triển:
 
-## Checklist biến môi trường (.env)
-
-| Biến | Bắt buộc | Mô tả |
-|------|----------|-------|
-| `ROCKETCHAT_URL` | ✅ | URL Rocket.Chat, ví dụ `https://dev.weteams.net` |
-| `ROCKETCHAT_AGENT_USERNAME` | ✅ | Tài khoản agent (không phải admin) |
-| `ROCKETCHAT_AGENT_PASSWORD` | ✅ | Mật khẩu agent |
-| `ROCKETCHAT_DEPARTMENT_ID` | ⬜ | ID phòng ban gán cho visitor (nếu có) |
-| `FB_PAGE_ACCESS_TOKEN` | ⬜* | Page Access Token (bắt buộc nếu dùng Facebook) |
-| `FB_PAGE_ID` | ⬜* | Page ID (bắt buộc nếu dùng Facebook) |
-| `FB_VERIFY_TOKEN` | ⬜* | Verify token khớp với cấu hình webhook Facebook |
-| `TELEGRAM_BOT_TOKEN` | ⬜* | Bot token từ BotFather (bắt buộc nếu dùng Telegram) |
-| `TELEGRAM_WEBHOOK_SECRET` | ⬜ | Secret kiểm tra header webhook Telegram |
-| `TELEGRAM_WEBHOOK_URL` | ⬜ | URL public dùng cho `npm run tg:set-webhook` |
-| `TELEGRAM_ALLOWED_CHAT_IDS` | ⬜ | Danh sách chat ID cách nhau bằng dấu phẩy; rỗng là cho phép tất cả |
-| `ADMIN_API_KEY` | ⬜ | Bật bảo vệ Bearer cho `/documents` và `/documents/upload` |
-| `DEBUG_POLLING` | ⬜ | Enable Rocket.Chat history polling logs |
-| `DEBUG_DUMP_PAYLOADS` | ⬜ | Dump có chọn lọc payload media đã redact vào `debug-dumps/` |
-| `TZ` | ⬜ | Server timezone (mặc định `Asia/Bangkok`) |
-| `PORT` | ⬜ | Cổng server (mặc định `3000`) |
-
-\* Chỉ bắt buộc nếu bạn dùng nền tảng tương ứng. Có thể chạy chỉ 1 nền tảng.
-
-## Expose ra internet bằng ngrok (để test với Facebook/Telegram thật)
-
-Facebook và Telegram yêu cầu webhook phải là HTTPS public. Dùng ngrok:
-
-```bash
-# Chạy server trước (npm start), sau đó mở 1 terminal khác:
-ngrok http 3000
+```powershell
+npm run dev
 ```
 
-Ngrok sẽ in ra URL public dạng `https://xxxx.ngrok-free.app`. Dùng URL này để
-cấu hình webhook:
+Mặc định bridge lắng nghe tại `http://localhost:3000`. Nếu cổng 3000 đã được
+Rocket.Chat sử dụng, đặt:
 
-> 💡 **Restart index.js có cần restart ngrok không?** — **Không.** Ngrok chỉ là
-> tunnel forward request tới cổng `3000`. Khi bạn restart `index.js`, chỉ server
-> Express bên trong bật/tắt lại; ngrok vẫn giữ nguyên URL public và tự hoạt động
-> lại khi server lắng nghe lại đúng cổng. Chỉ cần restart ngrok khi: đổi cổng
-> server (chạy `ngrok http <cổng mới>`), session ngrok hết hạn (URL đổi), hoặc
-> muốn URL public mới.
+```env
+PORT=3001
+```
 
+Rocket.Chat URL vẫn phải trỏ tới server Rocket.Chat, ví dụ:
 
-### Facebook Messenger
-1. Vào **Meta for Developers** → App → **Messenger** → **Webhooks**.
-2. Callback URL: `https://xxxx.ngrok-free.app/webhook/facebook`
-3. Verify token: nhập đúng giá trị `FB_VERIFY_TOKEN` trong `.env`.
-4. Subscribe vào event **messages**.
-5. Vào **Messenger → Settings → Access Tokens** để lấy `FB_PAGE_ACCESS_TOKEN`
-   và `FB_PAGE_ID`, điền vào `.env`.
+```env
+ROCKETCHAT_URL=http://localhost:3000
+```
+
+## Cấu hình môi trường
+
+### Rocket.Chat
+
+| Biến | Bắt buộc | Mô tả |
+|---|---:|---|
+| `ROCKETCHAT_URL` | Có | URL Rocket.Chat |
+| `ROCKETCHAT_AUTH_TOKEN` | Một trong hai nhóm | Personal Access Token |
+| `ROCKETCHAT_USER_ID` | Cùng nhóm trên | User ID đi cùng Personal Access Token |
+| `ROCKETCHAT_AGENT_USERNAME` | Nhóm thay thế | Tài khoản agent để đăng nhập |
+| `ROCKETCHAT_AGENT_PASSWORD` | Nhóm thay thế | Mật khẩu tài khoản agent |
+| `ROCKETCHAT_DEPARTMENT_ID` | Không | Department gán cho visitor |
+
+Nếu có cả `ROCKETCHAT_AUTH_TOKEN` và `ROCKETCHAT_USER_ID`, bridge ưu tiên
+Personal Access Token thay cho username/password.
 
 ### Telegram
 
-**Lấy Bot Token qua BotFather (từng bước):**
-1. Mở Telegram, tìm và mở chat với **@BotFather** (tài khoản chính thức của Telegram).
-2. Gõ lệnh `/newbot` và gửi.
-3. BotFather hỏi **tên hiển thị** của bot — nhập tên bất kỳ, ví dụ `My Support Bot`.
-4. BotFather hỏi **username** của bot — phải kết thúc bằng `bot`, ví dụ `mysupport_bot`.
-5. Nếu username hợp lệ, BotFather trả về **HTTP API token** dạng:
-   ```
-   1234567890:AAHf...token...xyz
-   ```
-   Đây chính là `TELEGRAM_BOT_TOKEN` — copy vào `.env`.
-6. (Tùy chọn) Gõ `/setdescription` để đặt mô tả, `/setabouttext` để đặt giới thiệu.
+| Biến | Bắt buộc | Mô tả |
+|---|---:|---|
+| `TELEGRAM_BOT_TOKEN` | Có khi dùng Telegram | Token do BotFather cấp |
+| `TELEGRAM_POLLING` | Không | Bật `true` để nhận update bằng `getUpdates` |
+| `TELEGRAM_POLL_INTERVAL_MS` | Không | Chu kỳ polling, mặc định 2000 ms |
+| `TELEGRAM_WEBHOOK_SECRET` | Khuyến nghị khi dùng webhook | Secret kiểm tra header Telegram |
+| `TELEGRAM_WEBHOOK_URL` | Khi dùng helper | URL public của `/webhook/telegram` |
+| `TELEGRAM_ALLOWED_CHAT_IDS` | Không | Danh sách chat ID, phân cách bằng dấu phẩy |
+| `TELEGRAM_MAX_DOCUMENT_BYTES` | Không | Giới hạn document, mặc định 100 MB |
+| `ROCKETCHAT_POLL_INTERVAL_MS` | Không | Chu kỳ polling Rocket.Chat, tối thiểu 10000 ms |
 
-> 💡 Token là bí mật — không chia sẻ. Nếu lỡ lộ, gõ `/revoke` trong BotFather để cấp token mới.
+`TELEGRAM_ALLOWED_CHAT_IDS` để trống nghĩa là cho phép mọi chat ID.
 
-**Đăng ký webhook cho bot** (thay `<TOKEN>` và URL thật):
-```bash
-curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://xxxx.ngrok-free.app/webhook/telegram"}'
-```
+Khi không bật polling và chưa đặt `TELEGRAM_WEBHOOK_SECRET`, bridge ghi cảnh
+báo lúc khởi động vì webhook không có xác thực secret.
 
-> ⚠️ **Lỗi thường gặp:** Telegram KHÔNG tự động gửi tin nhắn tới server như
-> Facebook (Facebook cấu hình webhook trong dashboard). Với Telegram bạn **bắt
-> buộc** phải gọi `setWebhook` để trỏ bot tới URL ngrok. Nếu quên bước này, bot
-> sẽ không nhận được tin nhắn nào dù token đúng. Kiểm tra webhook đã đăng ký
-> chưa bằng lệnh:
-> ```bash
-> curl "https://api.telegram.org/bot<TOKEN>/getWebhookInfo"
-> ```
-> Nếu `"url":""` nghĩa là chưa đăng ký — hãy chạy lệnh `setWebhook` ở trên.
+### Facebook Messenger
 
-Có thể cấu hình bằng helper (tự truyền `secret_token` nếu đã đặt secret):
+| Biến | Bắt buộc | Mô tả |
+|---|---:|---|
+| `FB_PAGE_ACCESS_TOKEN` | Có khi dùng Facebook | Page Access Token |
+| `FB_PAGE_ID` | Không | Page ID |
+| `FB_VERIFY_TOKEN` | Có khi bật webhook Facebook | Token xác minh webhook |
+
+`FB_VERIFY_TOKEN` không được ghi vào log.
+
+### Bảo vệ API tài liệu
+
+| Biến | Bắt buộc | Mô tả |
+|---|---:|---|
+| `ADMIN_API_KEY` | Khi dùng API tài liệu | Khóa Bearer cho `/documents` |
+
+Nếu chưa đặt `ADMIN_API_KEY`, hai endpoint tài liệu bị vô hiệu hóa và trả
+`503`, không mở truy cập tự do.
+
+### AI và tài liệu
+
+| Biến | Mặc định | Mô tả |
+|---|---|---|
+| `AI_ENABLED` | `false` | Bật AI tự trả lời |
+| `AI_API_KEY` | Rỗng | API key tương thích OpenAI |
+| `AI_BASE_URL` | `https://api.openai.com/v1` | URL API AI |
+| `AI_MODEL` | `gpt-4o-mini` | Tên model |
+| `AI_BUSINESS_CONTEXT` | Rỗng | Thông tin doanh nghiệp được phép dùng |
+| `AI_HANDOFF_MESSAGE` | Theo `constants/messages.js` | Tin nhắn chuyển cho agent |
+| `REQUEST_BODY_LIMIT` | `2mb` | Giới hạn body Express |
+| `DOCUMENT_CHUNK_SIZE` | `1200` | Kích thước đoạn tài liệu |
+| `DOCUMENT_CHUNK_OVERLAP` | `150` | Phần chồng lấn giữa các đoạn |
+| `DOCUMENT_TOP_K` | `4` | Số đoạn dùng khi truy vấn |
+| `DOCUMENT_SUMMARY_TOP_K` | `8` | Số đoạn dùng khi tóm tắt |
+
+AI chỉ sử dụng thông tin trong `AI_BUSINESS_CONTEXT` hoặc tài liệu của đúng
+platform và platform user ID. Khi không đủ thông tin, AI chuyển cuộc hội thoại
+cho agent thay vì tự bịa.
+
+### Vận hành và timeout
+
+| Biến | Mặc định | Mô tả |
+|---|---:|---|
+| `PORT` | `3000` | Cổng Express của bridge |
+| `HTTP_TIMEOUT_MS` | `15000` | Timeout request HTTP thông thường |
+| `HTTP_UPLOAD_TIMEOUT_MS` | `120000` | Timeout tải lên/tải xuống media |
+| `DEBUG_POLLING` | `false` | Ghi log request polling |
+| `DEBUG_DUMP_PAYLOADS` | `false` | Dump có chọn lọc payload media |
+| `TZ` | `Asia/Bangkok` | Múi giờ tiến trình |
+
+## Telegram: polling hoặc webhook
+
+### Polling local
 
 ```env
-TELEGRAM_WEBHOOK_URL=https://example.com/webhook/telegram
-TELEGRAM_WEBHOOK_SECRET=change-this-secret
+TELEGRAM_POLLING=true
+TELEGRAM_BOT_TOKEN=<token-cua-ban>
 ```
 
-```bash
+Bridge sẽ gọi `getUpdates` theo chu kỳ và tự giữ offset khi handler lỗi để
+update có thể được thử lại. Update đã xử lý được chống trùng trong bộ nhớ.
+
+### Webhook
+
+Đặt URL public và secret:
+
+```env
+TELEGRAM_POLLING=false
+TELEGRAM_WEBHOOK_URL=https://example.com/webhook/telegram
+TELEGRAM_WEBHOOK_SECRET=mot-secret-dai
+```
+
+Đăng ký webhook bằng helper:
+
+```powershell
 npm run tg:set-webhook
 ```
 
+Helper gửi `secret_token` nếu đã cấu hình và luôn gửi danh sách
+`allowed_updates` được bridge hỗ trợ.
 
+Route webhook:
 
-## Luồng hoạt động & log
-
-Server log rõ từng bước để dễ debug khi demo:
-
-- `[facebook] Received message from PSID ...` — nhận webhook Facebook
-- `[telegram] Received message from chat ...` — nhận webhook Telegram
-- `[rocketchat] Creating visitor ...` — tạo visitor
-- `[rocketchat] Room resolved: ...` — lấy room
-- `[rocketchat] Sending visitor message ...` — gửi tin vào room
-- `[poll] New agent message in room ... -> facebook:...` — polling phát hiện tin agent
-- `[facebook] Sending message to PSID ...` / `[telegram] Sending message to chat ...` — gửi ra ngoài
-
-## Bot AI tự động (optional)
-
-Khi bật AI, tin nhắn của khách sẽ được AI xử lý trước khi chuyển cho agent:
-
-- **AI trả lời được** (câu hỏi đơn giản: giờ mở cửa, giá, FAQ, chào hỏi...) →
-  AI tự trả lời ngay trên Facebook/Telegram, **đồng thời** tin nhắn của khách
-  và câu trả lời của AI đều được ghi vào room trên Omnichannel (tiền tố `🤖 AI:`)
-  để agent thấy toàn bộ hội thoại AI.
-- **AI không xử lý được** (khiếu nại, hoàn tiền, kỹ thuật phức tạp, khách yêu cầu
-  gặp người...) → gửi một câu báo đã chuyển cho nhân viên hỗ trợ, rồi chuyển sang
-  agent người thật (tạo visitor + room như bình thường).
-
-
-**Cấu hình trong `.env`:**
-```
-AI_ENABLED=true
-AI_API_KEY=sk-...            # key của OpenAI (hoặc API tương thích)
-AI_BASE_URL=https://api.openai.com/v1   # mặc định OpenAI, có thể đổi
-AI_MODEL=gpt-4o-mini
-AI_BUSINESS_CONTEXT=Tên doanh nghiệp: ...; Sản phẩm/dịch vụ: ...; Giờ làm việc: ...; Email hỗ trợ: ...
-AI_HANDOFF_MESSAGE=Mình chưa có đủ thông tin để trả lời chính xác câu hỏi này. Mình đã chuyển nội dung cho nhân viên hỗ trợ, bạn vui lòng chờ trong giây lát nhé.
+```text
+POST /webhook/telegram
 ```
 
-> 💡 Module `ai.js` dùng **OpenAI-compatible Chat Completions API**, nên có thể
-> trỏ tới bất kỳ endpoint tương thích nào (OpenAI, Azure, Groq, LLM local...).
-> Nếu `AI_ENABLED=false` hoặc thiếu `AI_API_KEY`, hệ thống hoạt động như cũ
-> (chuyển thẳng cho agent).
-> Bot chỉ được trả lời thông tin doanh nghiệp có trong `AI_BUSINESS_CONTEXT`
-> hoặc tài liệu user upload; nếu không có, nó sẽ hỏi lại hoặc chuyển agent,
-> không tự bịa giờ mở cửa/sản phẩm/giá.
+Request không có secret hoặc có secret sai trả `401` và không được xử lý.
 
-**Ví dụ dùng DeepSeek** (rẻ, tương thích OpenAI):
-```
-AI_ENABLED=true
-AI_API_KEY=sk-...                    # key từ platform.deepseek.com
-AI_BASE_URL=https://api.deepseek.com
-AI_MODEL=deepseek-chat               # hoặc deepseek-reasoner (R1)
+## Facebook Messenger
+
+Đăng ký callback URL trong Meta for Developers:
+
+```text
+GET  https://<domain>/webhook/facebook
+POST https://<domain>/webhook/facebook
 ```
 
+Khi xác minh, Meta phải gửi đúng `FB_VERIFY_TOKEN`. Cần dùng HTTPS public khi
+đăng ký webhook thật; có thể dùng ngrok cho môi trường phát triển:
 
-**Luồng hoạt động khi bật AI:**
-```
-khách gửi tin → webhook → forwardToRocketChat()
-   ├─ AI_ENABLED? ── không → tạo room, gửi tin cho agent (như cũ)
-   └─ có → gọi AI
-        ├─ AI trả lời được → tạo room, ghi tin khách + "🤖 AI: <trả lời>" vào room,
-        │                    rồi gửi câu trả lời về FB/TG (agent thấy hội thoại AI)
-        └─ AI không trả lời được → tạo room, báo khách chờ agent, gửi tin cho agent
+```powershell
+ngrok http 3001
 ```
 
-## Hỏi đáp theo tài liệu upload (MVP)
+Thay `3001` bằng giá trị `PORT` thực tế của bridge.
 
-Bridge hỗ trợ upload tài liệu text/markdown bằng API JSON. Tài liệu được lưu
-local trong `data/documents/` và tách riêng theo từng user bằng cặp:
+## API của bridge
+
+| Phương thức | Đường dẫn | Mục đích |
+|---|---|---|
+| `GET` | `/health` | Kiểm tra trạng thái và số room đang hoạt động |
+| `GET` | `/webhook/facebook` | Xác minh webhook Facebook |
+| `POST` | `/webhook/facebook` | Nhận sự kiện Facebook |
+| `POST` | `/webhook/telegram` | Nhận update Telegram |
+| `POST` | `/documents/upload` | Upload tài liệu cho một user |
+| `GET` | `/documents` | Liệt kê tài liệu của một user |
+
+Hai endpoint `/documents` yêu cầu:
+
+```http
+Authorization: Bearer <ADMIN_API_KEY>
+```
+
+Ví dụ upload tài liệu:
+
+```powershell
+curl.exe -X POST "http://localhost:3001/documents/upload" `
+  -H "Content-Type: application/json" `
+  -H "Authorization: Bearer <ADMIN_API_KEY>" `
+  -d '{"platform":"telegram","platformUserId":"222333444","filename":"faq.md","content":"Giờ làm việc: 8:00-17:00 từ thứ Hai đến thứ Sáu."}'
+```
+
+Đổi `3001` thành cổng bridge thực tế. Tài liệu được phân vùng theo:
 
 ```text
 platform + platformUserId
 ```
 
-Ví dụ Telegram chat id `222333444` sẽ dùng folder:
+Các phần mở rộng tài liệu được hỗ trợ gồm `.txt`, `.md`, `.csv`, `.tsv`,
+`.json`, `.jsonl`, `.html`, `.htm`, `.xml`, `.yaml`, `.yml`, `.log`, `.ini`,
+`.conf`, `.env`, `.pdf` và `.docx`.
 
-```text
-data/documents/telegram_222333444/
+## Text, emoji và media
+
+- Shortcode đã biết như `:smile:` và `:thumbsup:` được đổi thành emoji khi gửi
+  sang Telegram.
+- Shortcode không nhận ra được giữ nguyên.
+- Inline code và fenced code không bị chuyển shortcode.
+- Text Telegram được chuẩn hóa Unicode NFC khi chuyển vào Rocket.Chat.
+- Tin Telegram dài hơn 4096 ký tự được tách theo xuống dòng/khoảng trắng.
+- Bộ tách dùng grapheme cluster để không cắt đôi emoji ghép hoặc cờ.
+- JSON gửi đi sử dụng UTF-8.
+- Caption media sử dụng cùng quy tắc định dạng text.
+- Telegram không dùng `parse_mode`; Markdown Rocket.Chat có thể hiển thị dạng
+  raw trên Telegram. Đây là lựa chọn chủ đích để tránh lỗi escape.
+
+Media Telegram nhận vào được hỗ trợ gồm:
+
+- Ảnh.
+- File/document.
+- Video.
+- Voice.
+- Audio, gồm MP3.
+- Animation/GIF.
+- Video note.
+- Sticker tĩnh WebP.
+
+Sticker động và sticker video được nhận diện là chưa hỗ trợ. Media tải xuống
+Telegram mặc định bị giới hạn 20 MB; document Telegram có giới hạn riêng
+100 MB.
+
+## AI tự động và chuyển agent
+
+Khi `AI_ENABLED=true`, bridge gửi câu hỏi vào API AI trước khi chuyển cho agent:
+
+1. Nếu AI trả lời được, câu trả lời được gửi về nền tảng và ghi vào room
+   Rocket.Chat.
+2. Nếu AI không trả lời được, bridge gửi `AI_HANDOFF_MESSAGE` cho khách và
+   chuyển hội thoại cho agent.
+3. Nếu AI tắt hoặc thiếu API key, tin nhắn đi thẳng tới agent.
+
+Bridge cũng hỗ trợ tra cứu tài liệu đã upload theo đúng user, không trộn dữ
+liệu giữa các cuộc hội thoại.
+
+## Log, retry và dữ liệu lưu trữ
+
+- Request HTTP dùng timeout và policy retry tập trung.
+- Polling Rocket.Chat mặc định mỗi 10 giây; khi nhận 429, bridge tạm dừng theo
+  thời gian Rocket.Chat yêu cầu.
+- GET có thể retry lỗi mạng, timeout, 429 và 5xx theo caller; POST mặc định
+  không retry để tránh gửi trùng.
+- Telegram tôn trọng `retry_after` khi nhận 429.
+- Token, password, authorization và visitor token được mask trong logger.
+- Nội dung đầy đủ của tin nhắn không được ghi vào log polling.
+- Mapping visitor/room được lưu trong `mapping.json`.
+- Ghi mapping dùng file tạm rồi rename để giảm rủi ro file dở dang.
+- Payload media debug được ghi vào `debug-dumps/` khi bật
+  `DEBUG_DUMP_PAYLOADS=true`; token trong payload được redact.
+- `debug-dumps/` không được commit.
+
+## Kiểm thử
+
+Chạy toàn bộ test:
+
+```powershell
+npm test
 ```
 
-Upload tài liệu cho user:
+Bộ test hiện có kiểm tra:
 
-```bash
-curl -X POST "http://localhost:3000/documents/upload" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "platform": "telegram",
-    "platformUserId": "222333444",
-    "filename": "faq.md",
-    "content": "Giờ làm việc: 8:00-17:00 từ thứ Hai đến thứ Sáu.\nEmail hỗ trợ: support@example.com"
-  }'
-```
+- Mask thông tin nhạy cảm.
+- Timeout, retry HTTP, retry Telegram 429 và chính sách không retry POST.
+- Phân loại và gửi các loại media Telegram.
+- Fallback ảnh sang document khi Telegram trả lỗi phù hợp.
+- Chuyển shortcode, bảo toàn code, NFC và tách text dài.
+- Không cắt đôi emoji ghép.
+- Trao đổi JSON UTF-8 với server giả lập Telegram/Rocket.Chat.
 
-Các endpoint tài liệu luôn yêu cầu:
+Checklist kiểm thử thủ công nằm tại
+[scripts/smoke.md](scripts/smoke.md), gồm text, emoji, ảnh, PDF, video, voice,
+MP3, GIF, sticker, file lớn, restart và mất mạng.
 
-```bash
-  -H "Authorization: Bearer $ADMIN_API_KEY"
-```
+## Xử lý lỗi thường gặp
 
-Nếu `ADMIN_API_KEY` chưa đặt, endpoint trả `503` và bị vô hiệu hóa.
+### `fetch failed` khi polling Rocket.Chat
 
-Xem danh sách tài liệu của user:
+Kiểm tra:
 
-```bash
-curl "http://localhost:3000/documents?platform=telegram&platformUserId=222333444"
-```
+1. Rocket.Chat có đang chạy không.
+2. `ROCKETCHAT_URL` có đúng host và port không.
+3. Port bridge và port Rocket.Chat có bị trùng không.
+4. Từ máy chạy bridge có truy cập được `ROCKETCHAT_URL` không.
+5. Personal Access Token/User ID hoặc thông tin agent có còn hiệu lực không.
 
-Khi user đó hỏi qua webhook Telegram/Facebook, AI sẽ chỉ tìm tài liệu thuộc
-đúng `platformUserId` đó. Nếu tài liệu của user có thông tin liên quan, AI trả
-lời dựa trên tài liệu. Nếu không có thông tin liên quan, AI không bịa và chuyển
-cho agent.
-
-### Upload tài liệu trực tiếp qua Telegram
-
-Khi đã điền `TELEGRAM_BOT_TOKEN`, có thể bật polling để test local mà không cần
-ngrok:
+Ví dụ khi Rocket.Chat chạy ở cổng 3000 và bridge chạy ở cổng 3001:
 
 ```env
-TELEGRAM_POLLING=true
+ROCKETCHAT_URL=http://localhost:3000
+PORT=3001
 ```
 
-Sau đó chạy `npm start`, mở bot Telegram và gửi file text-based trực tiếp vào
-bot. Bridge sẽ tải file, lưu vào:
+### `/documents` trả `503`
+
+Đặt `ADMIN_API_KEY` rồi khởi động lại bridge. Mọi request phải gửi header
+`Authorization: Bearer <ADMIN_API_KEY>`.
+
+### Webhook Telegram trả `401`
+
+Kiểm tra giá trị `TELEGRAM_WEBHOOK_SECRET` trên bridge có trùng với secret đã
+đăng ký trong Telegram hay không.
+
+## Giới hạn hiện tại
+
+- Facebook Messenger hiện chỉ xử lý text ở chiều nhận.
+- Telegram không dùng `parse_mode`, nên Markdown Rocket.Chat hiển thị dạng
+  raw ở Telegram.
+- Media tải xuống mặc định giới hạn 20 MB.
+- Voice có thể có khác biệt khi phát trên một số trình duyệt, đặc biệt Safari.
+- Sticker động và sticker video chưa được chuyển như sticker động.
+- Test dùng mock/local server; vẫn cần chạy smoke checklist với Telegram và
+  Rocket.Chat thật.
+
+## Cấu trúc chính
 
 ```text
-data/documents/telegram_<chat_id>/
+index.js                 Express server, route và vòng polling
+telegram.js              Telegram webhook, polling và gửi media
+facebook.js              Facebook webhook và gửi text
+rocketchat.js            Rocket.Chat Livechat API
+textFormat.js            Chuẩn hóa text, shortcode và tách grapheme
+documents.js              Lưu/index tài liệu theo từng user
+mapping.js                Lưu mapping visitor và room
+media/                    Tải, phân loại và chuyển media
+constants/                Cấu hình, message và error
+test/                     Bộ test node:test
+scripts/smoke.md          Checklist kiểm thử thủ công
 ```
-
-và trả lời lại trên Telegram khi index xong.
-
-Các loại file hiện hỗ trợ khi gửi trực tiếp qua Telegram:
-
-```text
-.txt, .md, .csv, .tsv, .json, .jsonl, .html, .htm, .xml,
-.yaml, .yml, .log, .ini, .conf, .env, .pdf, .docx
-```
-
-Giới hạn upload của bridge mặc định là `100MB` qua:
-
-```env
-TELEGRAM_MAX_DOCUMENT_BYTES=104857600
-REQUEST_BODY_LIMIT=100mb
-```
-
-Với `.pdf` và `.docx`, bridge sẽ trích xuất text rồi mới index. File `.doc`
-cũ và `.xlsx` chưa hỗ trợ trong MVP này.
-
-
-## Xử lý lỗi
-
-
-- **401 (token hết hạn)**: tự động re-login agent và retry 1 lần.
-- **Lỗi gọi Rocket.Chat**: log rõ status + body để debug.
-- **Lỗi gửi Facebook/Telegram**: log lỗi, không làm crash server.
-
-## Ghi chú
-
-- Mapping (visitor token, room ID, platform, platform user ID) được lưu trong
-  `mapping.json` nên không mất dữ liệu khi restart server.
-- Visitor token được sinh **deterministic** từ platform user id
-  (`visitor_<PSID>` / `visitor_<chat_id>`) nên mỗi người dùng luôn map về cùng
-  một visitor/room.
-- Chỉ xử lý **tin nhắn text** ở bản demo này.
-- Telegram text được gửi plain text, không đặt `parse_mode`; Markdown Rocket.Chat
-  có thể hiển thị dạng raw trên Telegram. Đây là lựa chọn có chủ đích để tránh
-  lỗi escape.
-- Giới hạn đã biết: tải xuống media mặc định 20MB; voice có thể khác nhau giữa
-  trình duyệt (đặc biệt Safari); sticker động hiện chưa được chuyển như sticker.
-- `npm test` dùng mock/local server, không thay thế smoke test với Telegram và
-  Rocket.Chat thật. Checklist nằm ở [scripts/smoke.md](scripts/smoke.md).
