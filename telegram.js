@@ -10,6 +10,8 @@
 const { API, DOCUMENT_EXTENSIONS, ENV, FILES, HEADERS, MIME_TYPES, TELEGRAM_MESSAGE_TYPES } = require('./constants/config');
 const { ERRORS } = require('./constants/errors');
 const { dumpTelegramUpdate } = require('./debugDump');
+const { fetchWithTimeout } = require('./httpClient');
+const { log } = require('./logger');
 let lastUpdateId = 0;
 
 function getExtension(filename) {
@@ -32,13 +34,13 @@ async function handleWebhook(body, onMessage, onDocument, onUnsupportedMessage) 
   try {
     dumpTelegramUpdate(body);
   } catch (err) {
-    console.warn('[telegram] Failed to dump update payload:', err.message);
+    log.warn('[telegram] Failed to dump update payload:', err.message);
   }
 
   const message = body.message || body.edited_message;
 
   if (!message) {
-    console.log('[telegram] Received non-message update, ignoring.');
+    log.info('[telegram] Received non-message update, ignoring.');
     return;
   }
 
@@ -48,21 +50,21 @@ async function handleWebhook(body, onMessage, onDocument, onUnsupportedMessage) 
   const document = message.document;
 
   if (!chatId) {
-    console.warn('[telegram] Update without chat id, skipping.');
+    log.warn('[telegram] Update without chat id, skipping.');
     return;
   }
 
   if (text) {
-    console.log(`[telegram] Received message from chat ${chatId}: "${text}"`);
+    log.info('[telegram] Received message', { chatId, type: 'text', length: text.length });
     await onMessage(chatId, text);
   } else if (document) {
-    console.log(`[telegram] Received document from chat ${chatId}: "${document.file_name || document.file_id}"`);
+    log.info('[telegram] Received document', { chatId, type: 'document', filenameLength: String(document.file_name || document.file_id || '').length });
     if (onDocument) {
       await onDocument(chatId, document, caption);
     }
   } else {
     const messageType = getMessageType(message);
-    console.log(`[telegram] Received ${messageType} message from chat ${chatId}.`);
+    log.info('[telegram] Received message', { chatId, type: messageType, length: 0 });
     if (onUnsupportedMessage) {
       await onUnsupportedMessage(chatId, messageType, caption);
     }
@@ -81,7 +83,7 @@ async function pollUpdates(onMessage, onDocument, onUnsupportedMessage) {
   }
 
   const url = `${API.telegram.baseUrl}/bot${ENV.telegramBotToken}/getUpdates?${params.toString()}`;
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url, {}, { retries: 2 });
   const data = await res.json();
 
   if (!res.ok || !data.ok) {
@@ -110,14 +112,14 @@ async function downloadDocument(document) {
   }
 
   const fileInfoUrl = `${API.telegram.baseUrl}/bot${ENV.telegramBotToken}/getFile?file_id=${encodeURIComponent(document.file_id)}`;
-  const fileInfoRes = await fetch(fileInfoUrl);
+  const fileInfoRes = await fetchWithTimeout(fileInfoUrl, {}, { retries: 2 });
   const fileInfo = await fileInfoRes.json();
   if (!fileInfoRes.ok || !fileInfo.ok || !fileInfo.result || !fileInfo.result.file_path) {
     throw new Error(ERRORS.telegram.fileInfoFailed(fileInfoRes.status, fileInfo));
   }
 
   const downloadUrl = `${API.telegram.fileBaseUrl}/bot${ENV.telegramBotToken}/${fileInfo.result.file_path}`;
-  const downloadRes = await fetch(downloadUrl);
+  const downloadRes = await fetchWithTimeout(downloadUrl, {}, { timeoutMs: ENV.httpUploadTimeoutMs, retries: 2 });
   if (!downloadRes.ok) {
     throw new Error(ERRORS.telegram.fileDownloadFailed(downloadRes.status));
   }
@@ -146,19 +148,19 @@ async function sendMessage(chatId, text) {
     text,
   };
 
-  console.log(`[telegram] Sending message to chat ${chatId}: "${text}"`);
-  const res = await fetch(url, {
+  log.info('[telegram] Sending message', { chatId, type: 'text', length: text.length });
+  const res = await fetchWithTimeout(url, {
     method: 'POST',
     headers: { [HEADERS.contentType]: 'application/json' },
     body: JSON.stringify(body),
-  });
+  }, { retries: 0 });
 
   const data = await res.json();
   if (!res.ok || !data.ok) {
     throw new Error(ERRORS.telegram.sendFailed(res.status, data));
   }
 
-  console.log(`[telegram] Message sent to chat ${chatId}.`);
+  log.info('[telegram] Message sent', { chatId, type: 'text' });
   return data;
 }
 

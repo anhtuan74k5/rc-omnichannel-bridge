@@ -14,6 +14,8 @@ const mapping = require('./mapping');
 const { API, ENV, FILES, HEADERS, MIME_TYPES } = require('./constants/config');
 const { ERRORS } = require('./constants/errors');
 const { dumpRocketChatMessage } = require('./debugDump');
+const { fetchWithTimeout } = require('./httpClient');
+const { log } = require('./logger');
 
 const ROCKETCHAT_URL = ENV.rocketchatUrl.replace(/\/+$/, '');
 
@@ -38,14 +40,16 @@ async function rcFetch(path, options = {}, retried = false) {
   const url = `${ROCKETCHAT_URL}${path}`;
   const isPollingHistory = path.includes(`${API.rocketChat.messagesHistoryPath}/`);
   if (!isPollingHistory || ENV.debugPolling) {
-    console.log(`[rocketchat] ${options.method || 'GET'} ${path}`);
+    log.info(`[rocketchat] ${options.method || 'GET'} ${path}`);
   }
 
-  const res = await fetch(url, { ...options, headers });
+  const res = await fetchWithTimeout(url, { ...options, headers }, {
+    retries: options.method && options.method.toUpperCase() === 'GET' ? 2 : 0,
+  });
 
   // If token expired / unauthorized, re-login and retry once.
   if (res.status === 401 && !retried) {
-    console.warn('[rocketchat] Got 401, re-login and retry once...');
+    log.warn('[rocketchat] Got 401, re-login and retry once...');
     agentSession = null; // force re-login
     return rcFetch(path, options, true);
   }
@@ -87,15 +91,15 @@ async function loginAgent() {
     return agentSession;
   }
 
-  console.log('[rocketchat] Logging in agent...');
-  const res = await fetch(`${ROCKETCHAT_URL}${API.rocketChat.loginPath}`, {
+  log.info('[rocketchat] Logging in agent...');
+  const res = await fetchWithTimeout(`${ROCKETCHAT_URL}${API.rocketChat.loginPath}`, {
     method: 'POST',
     headers: { [HEADERS.contentType]: 'application/json' },
     body: JSON.stringify({
       user: ENV.agentUsername,
       password: ENV.agentPassword,
     }),
-  });
+  }, { retries: 0 });
 
   const body = await res.json();
   if (!res.ok || !body.data || !body.data.authToken) {
@@ -108,7 +112,7 @@ async function loginAgent() {
     // Rocket.Chat tokens typically last 10 days; we refresh a bit earlier.
     expiresAt: Date.now() + 9 * 24 * 60 * 60 * 1000,
   };
-  console.log('[rocketchat] Agent logged in successfully.');
+  log.info('[rocketchat] Agent logged in successfully.');
   return agentSession;
 }
 
@@ -127,11 +131,11 @@ async function getOrCreateVisitor(platformUserId, name, department) {
   // Check if we already created this visitor on Rocket.Chat.
   const existing = mapping.findByVisitorToken(visitorToken);
   if (existing && existing.visitorToken) {
-    console.log(`[rocketchat] Visitor already exists for token ${visitorToken}`);
+    log.info('[rocketchat] Visitor already exists', { visitorToken });
     return visitorToken;
   }
 
-  console.log(`[rocketchat] Creating visitor for ${platformUserId} (${name})...`);
+  log.info('[rocketchat] Creating visitor', { platformUserId, nameLength: String(name || '').length });
   const body = await rcFetch(API.rocketChat.visitorPath, {
     method: 'POST',
     body: JSON.stringify({
@@ -148,7 +152,7 @@ async function getOrCreateVisitor(platformUserId, name, department) {
     throw new Error(ERRORS.rocketchat.visitorFailed(body));
   }
 
-  console.log(`[rocketchat] Visitor created with token ${visitorToken}`);
+  log.info('[rocketchat] Visitor created', { visitorToken });
   return visitorToken;
 }
 
@@ -161,11 +165,11 @@ async function getOrCreateVisitor(platformUserId, name, department) {
 async function getOrCreateRoom(visitorToken) {
   const existing = mapping.findByVisitorToken(visitorToken);
   if (existing && existing.roomId) {
-    console.log(`[rocketchat] Room already known for token ${visitorToken}: ${existing.roomId}`);
+    log.info('[rocketchat] Room already known', { visitorToken, roomId: existing.roomId });
     return existing.roomId;
   }
 
-  console.log(`[rocketchat] Fetching room for token ${visitorToken}...`);
+  log.info('[rocketchat] Fetching room', { visitorToken });
   const body = await rcFetch(`${API.rocketChat.roomPath}?token=${encodeURIComponent(visitorToken)}`);
 
   if (!body || !body.room || !body.room._id) {
@@ -173,7 +177,7 @@ async function getOrCreateRoom(visitorToken) {
   }
 
   const roomId = body.room._id;
-  console.log(`[rocketchat] Room resolved: ${roomId}`);
+  log.info('[rocketchat] Room resolved', { roomId });
 
   if (existing) {
     mapping.update(existing, { roomId });
@@ -187,7 +191,7 @@ async function getOrCreateRoom(visitorToken) {
  * POST /api/v1/livechat/message to send a visitor message into the room.
  */
 async function sendMessageToRocketChat(visitorToken, roomId, text) {
-  console.log(`[rocketchat] Sending visitor message to room ${roomId}: "${text}"`);
+  log.info('[rocketchat] Sending visitor message', { roomId, type: 'text', length: text.length });
   const body = await rcFetch(API.rocketChat.messagePath, {
     method: 'POST',
     body: JSON.stringify({
@@ -201,7 +205,7 @@ async function sendMessageToRocketChat(visitorToken, roomId, text) {
     throw new Error(ERRORS.rocketchat.messageFailed(body));
   }
 
-  console.log('[rocketchat] Visitor message sent successfully.');
+  log.info('[rocketchat] Visitor message sent successfully.');
   return body;
 }
 
@@ -218,14 +222,14 @@ async function uploadLivechatFile(visitorToken, roomId, { filename, buffer, mime
   }
 
   const url = `${ROCKETCHAT_URL}${API.rocketChat.uploadPath}/${encodeURIComponent(roomId)}`;
-  console.log(`[rocketchat] Uploading visitor file to room ${roomId}: "${filename}"`);
-  const res = await fetch(url, {
+  log.info('[rocketchat] Uploading visitor file', { roomId, filenameLength: String(filename || '').length });
+  const res = await fetchWithTimeout(url, {
     method: 'POST',
     headers: {
       [HEADERS.visitorToken]: visitorToken,
     },
     body: form,
-  });
+  }, { timeoutMs: ENV.httpUploadTimeoutMs, retries: 0 });
 
   let body = null;
   const text = await res.text();
@@ -239,7 +243,7 @@ async function uploadLivechatFile(visitorToken, roomId, { filename, buffer, mime
     throw new Error(ERRORS.rocketchat.uploadFailed(res.status, text));
   }
 
-  console.log('[rocketchat] Visitor file uploaded successfully.');
+  log.info('[rocketchat] Visitor file uploaded successfully.');
   return body;
 }
 
@@ -266,14 +270,14 @@ async function pollNewAgentMessages(roomId, visitorToken, lastMessageTimestamp) 
       try {
         dumpRocketChatMessage(m);
       } catch (err) {
-        console.warn('[rocketchat] Failed to dump message payload:', err.message);
+        log.warn('[rocketchat] Failed to dump message payload:', err.message);
       }
       return true;
     })
     .sort((a, b) => new Date(a.ts) - new Date(b.ts));
 
   if (newMessages.length > 0) {
-    console.log(`[rocketchat] Poll found ${newMessages.length} new agent message(s) in room ${roomId}`);
+    log.info('[rocketchat] Poll found new agent messages', { count: newMessages.length, roomId });
   }
 
   return newMessages;

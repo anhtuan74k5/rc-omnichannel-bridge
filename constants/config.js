@@ -16,6 +16,8 @@ const DEFAULTS = Object.freeze({
   documentChunkOverlap: 150,
   documentTopK: 4,
   documentSummaryTopK: 8,
+  httpTimeoutMs: 15000,
+  httpUploadTimeoutMs: 120000,
 });
 
 const API = Object.freeze({
@@ -120,6 +122,8 @@ const ENV = Object.freeze({
   documentChunkOverlap: Number(process.env.DOCUMENT_CHUNK_OVERLAP || DEFAULTS.documentChunkOverlap),
   documentTopK: Number(process.env.DOCUMENT_TOP_K || DEFAULTS.documentTopK),
   documentSummaryTopK: Number(process.env.DOCUMENT_SUMMARY_TOP_K || DEFAULTS.documentSummaryTopK),
+  httpTimeoutMs: Number(process.env.HTTP_TIMEOUT_MS || DEFAULTS.httpTimeoutMs),
+  httpUploadTimeoutMs: Number(process.env.HTTP_UPLOAD_TIMEOUT_MS || DEFAULTS.httpUploadTimeoutMs),
 });
 
 module.exports = {

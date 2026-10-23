@@ -9,6 +9,8 @@
 
 const { API, ENV, HEADERS } = require('./constants/config');
 const { ERRORS } = require('./constants/errors');
+const { fetchWithTimeout } = require('./httpClient');
+const { log } = require('./logger');
 
 /**
  * Handle GET webhook verification from Facebook.
@@ -19,13 +21,13 @@ function handleVerify(req, res) {
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
 
-  console.log(`[facebook] Webhook verify request: mode=${mode}, token=${token}`);
+  log.info('[facebook] Webhook verify request', { mode });
 
   if (mode === 'subscribe' && token === ENV.facebookVerifyToken) {
-    console.log('[facebook] Webhook verified successfully.');
+    log.info('[facebook] Webhook verified successfully.');
     res.status(200).send(challenge);
   } else {
-    console.warn('[facebook] Webhook verification FAILED (token mismatch).');
+    log.warn('[facebook] Webhook verification failed (token mismatch).');
     res.sendStatus(403);
   }
 }
@@ -39,7 +41,7 @@ function handleVerify(req, res) {
  */
 async function handleWebhook(body, onMessage) {
   if (body.object !== 'page') {
-    console.warn('[facebook] Ignoring non-page webhook event.');
+    log.warn('[facebook] Ignoring non-page webhook event.');
     return;
   }
 
@@ -49,16 +51,16 @@ async function handleWebhook(body, onMessage) {
       const message = event.message;
 
       if (!psid) {
-        console.warn('[facebook] Event without sender id, skipping.');
+        log.warn('[facebook] Event without sender id, skipping.');
         continue;
       }
 
       // Only handle text messages for now.
       if (message && message.text) {
-        console.log(`[facebook] Received message from PSID ${psid}: "${message.text}"`);
+        log.info('[facebook] Received message', { psid, type: 'text', length: message.text.length });
         await onMessage(psid, message.text);
       } else {
-        console.log(`[facebook] Received non-text event from PSID ${psid}, ignoring.`);
+        log.info('[facebook] Received non-text event', { psid, type: 'unsupported', length: 0 });
       }
     }
   }
@@ -75,19 +77,19 @@ async function sendMessage(psid, text) {
     message: { text },
   };
 
-  console.log(`[facebook] Sending message to PSID ${psid}: "${text}"`);
-  const res = await fetch(url, {
+  log.info('[facebook] Sending message', { psid, type: 'text', length: text.length });
+  const res = await fetchWithTimeout(url, {
     method: 'POST',
     headers: { [HEADERS.contentType]: 'application/json' },
     body: JSON.stringify(body),
-  });
+  }, { retries: 0 });
 
   const data = await res.json();
   if (!res.ok || data.error) {
     throw new Error(ERRORS.facebook.sendFailed(res.status, data));
   }
 
-  console.log(`[facebook] Message sent to PSID ${psid}.`);
+  log.info('[facebook] Message sent', { psid, type: 'text' });
   return data;
 }
 
