@@ -279,6 +279,13 @@ function extractAttachments(message) {
   const files = Array.isArray(message && message.files) ? message.files : [];
   const attachments = Array.isArray(message && message.attachments) ? message.attachments : [];
 
+  for (const item of attachments) candidates.push({
+    id: item && item.fileId,
+    filename: item && item.title,
+    mimeType: item && item.mimeType,
+    size: item && item.size,
+    source: item && item.title_link,
+  });
   if (file) candidates.push({
     id: file._id,
     filename: file.name,
@@ -292,13 +299,6 @@ function extractAttachments(message) {
     mimeType: item && item.type,
     size: item && item.size,
     source: fileUpload && fileUpload.publicFilePath,
-  });
-  for (const item of attachments) candidates.push({
-    id: item && item.fileId,
-    filename: item && item.title,
-    mimeType: item && item.mimeType,
-    size: item && item.size,
-    source: item && item.title_link,
   });
 
   const seen = new Set();
