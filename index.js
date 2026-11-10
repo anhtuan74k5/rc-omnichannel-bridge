@@ -481,7 +481,7 @@ async function pollAgentMessages() {
                 mimeType: downloaded.mimeType || attachment.mimeType,
                 filename: downloaded.filename || attachment.filename,
                 size: downloaded.buffer.length,
-              }, completed.size === 0 ? text : '');
+              }, completed.size === 0 ? text : '', { markdown: true });
               completed.add(attachment.source);
               messageRetryCounts.delete(attachmentRetryKey);
             } catch (err) {
@@ -526,7 +526,8 @@ async function pollAgentMessages() {
           if (entry.platform === 'facebook') {
             await facebook.sendMessage(entry.platformUserId, text);
           } else if (entry.platform === 'telegram') {
-            await telegram.sendMessage(entry.platformUserId, text);
+            // Agent text only: render Rocket.Chat Markdown (bold/italic/strike/code).
+            await telegram.sendMessage(entry.platformUserId, text, { markdown: true });
           }
           messageRetryCounts.delete(retryKey);
           markMessageProcessed(entry, messageId, ts);

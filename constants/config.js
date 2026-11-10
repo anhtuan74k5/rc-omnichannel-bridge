@@ -121,6 +121,8 @@ const ENV = Object.freeze({
   telegramMaxMediaBytes: Number(
     process.env.TELEGRAM_MAX_MEDIA_BYTES || DEFAULTS.telegramMaxMediaBytes
   ),
+  // Render Rocket.Chat Markdown in agent -> Telegram messages; set to 'false' to send raw text.
+  telegramRenderMarkdown: process.env.TELEGRAM_RENDER_MARKDOWN !== 'false',
   telegramPollingEnabled: process.env.TELEGRAM_POLLING === 'true',
   telegramPollIntervalMs: Number(
     process.env.TELEGRAM_POLL_INTERVAL_MS || DEFAULTS.telegramPollIntervalMs

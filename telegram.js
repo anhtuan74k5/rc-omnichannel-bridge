@@ -14,7 +14,7 @@ const { ERRORS } = require('./constants/errors');
 const { dumpTelegramUpdate } = require('./debugDump');
 const { fetchWithTimeout } = require('./httpClient');
 const { log } = require('./logger');
-const { rcToTelegramText, splitTelegramText, telegramToRcText } = require('./textFormat');
+const { buildTelegramMessages, telegramToRcText } = require('./textFormat');
 let lastUpdateId = 0;
 const processedUpdateIds = new Set();
 const updateRetryCounts = new Map();
@@ -188,27 +188,72 @@ async function downloadDocument(document) {
   };
 }
 
+function telegramApiError(status, data) {
+  const error = new Error(ERRORS.telegram.sendFailed(status, data));
+  error.status = status;
+  error.description = String(data && data.description || '');
+  return error;
+}
+
+/**
+ * True when Telegram rejected the *formatting* (not the chat, token or size),
+ * so a plain-text resend of the same content is worth trying.
+ */
+function isEntityParseError(error) {
+  return Boolean(error)
+    && error.status === 400
+    && /can't parse entities|unsupported start tag|unmatched end tag|can't find end tag/i.test(error.description || '');
+}
+
+function isMarkdownEnabled(options) {
+  return Boolean(options && options.markdown) && ENV.telegramRenderMarkdown;
+}
+
+async function postTextMessage(chatId, text, parseMode) {
+  const url = `${API.telegram.baseUrl}/bot${ENV.telegramBotToken}/sendMessage`;
+  const payload = { chat_id: chatId, text };
+  if (parseMode) payload.parse_mode = parseMode;
+  const res = await fetchWithTimeout(url, {
+    method: 'POST',
+    headers: { [HEADERS.contentType]: 'application/json; charset=utf-8' },
+    body: JSON.stringify(payload),
+  }, { retries: 0 });
+  const data = await res.json();
+  if (!res.ok || !data.ok) throw telegramApiError(res.status, data);
+  return data;
+}
+
+/**
+ * Send one prepared part. If Telegram rejects the formatting, resend the same
+ * part as plain text so the customer still receives the agent's message.
+ */
+async function sendTextPart(chatId, part) {
+  log.info('[telegram] Sending message', { chatId, type: 'text', length: part.source.length, formatted: Boolean(part.parseMode) });
+  try {
+    return await postTextMessage(chatId, part.text, part.parseMode);
+  } catch (error) {
+    if (!part.parseMode || !isEntityParseError(error)) throw error;
+    log.warn('[telegram] Formatting rejected by Telegram; resending as plain text', { chatId, error: error.description });
+    return postTextMessage(chatId, part.source);
+  }
+}
+
 /**
  * Send a text message to a Telegram chat via Bot API.
  * POST https://api.telegram.org/bot<TOKEN>/sendMessage
+ *
+ * @param {string|number} chatId
+ * @param {string} text
+ * @param {{markdown?: boolean}} [options] markdown=true renders Rocket.Chat
+ *   Markdown (bold/italic/strike/code/links). Leave unset for bridge, system and
+ *   AI messages, which must be sent verbatim.
  */
-async function sendMessage(chatId, text) {
-  const url = `${API.telegram.baseUrl}/bot${ENV.telegramBotToken}/sendMessage`;
-  const textParts = rcToTelegramText(text);
+async function sendMessage(chatId, text, options = {}) {
+  const parts = buildTelegramMessages(text, { markdown: isMarkdownEnabled(options) });
 
   let lastData;
-  for (const part of textParts) {
-    log.info('[telegram] Sending message', { chatId, type: 'text', length: part.length });
-    const res = await fetchWithTimeout(url, {
-      method: 'POST',
-      headers: { [HEADERS.contentType]: 'application/json; charset=utf-8' },
-      body: JSON.stringify({ chat_id: chatId, text: part }),
-    }, { retries: 0 });
-    const data = await res.json();
-    if (!res.ok || !data.ok) {
-      throw new Error(ERRORS.telegram.sendFailed(res.status, data));
-    }
-    lastData = data;
+  for (const part of parts) {
+    lastData = await sendTextPart(chatId, part);
   }
 
   log.info('[telegram] Message sent', { chatId, type: 'text' });
@@ -216,21 +261,18 @@ async function sendMessage(chatId, text) {
 }
 
 function mediaError(status, data) {
-  const error = new Error(ERRORS.telegram.sendFailed(status, data));
-  error.status = status;
-  return error;
+  return telegramApiError(status, data);
 }
 
-async function sendTelegramMedia(method, field, chatId, descriptor, caption) {
+async function sendTelegramMedia(method, field, chatId, descriptor, caption, parseMode) {
   if (!descriptor || !Buffer.isBuffer(descriptor.buffer) || descriptor.buffer.length === 0) {
     throw new Error(ERRORS.telegram.mediaInvalidBuffer);
   }
   const url = `${API.telegram.baseUrl}/bot${ENV.telegramBotToken}/${method}`;
   const form = new FormData();
   form.append('chat_id', String(chatId));
-  const captionParts = splitTelegramText(caption, 1024);
-  const captionText = captionParts[0] || '';
-  if (captionText) form.append('caption', captionText.slice(0, 1024));
+  if (caption) form.append('caption', caption);
+  if (caption && parseMode) form.append('parse_mode', parseMode);
   form.append(field, new Blob([descriptor.buffer], {
     type: descriptor.mimeType || MIME_TYPES.octetStream,
   }), descriptor.filename || FILES.defaultUpload);
@@ -244,49 +286,61 @@ async function sendTelegramMedia(method, field, chatId, descriptor, caption) {
   return data;
 }
 
-async function sendMediaPart(method, field, chatId, descriptor, caption) {
-  const result = await sendTelegramMedia(method, field, chatId, descriptor, caption);
-  const captionParts = splitTelegramText(caption, 1024);
-  for (const remainder of captionParts.slice(1)) {
-    await sendMessage(chatId, remainder);
+async function sendMediaPart(method, field, chatId, descriptor, caption, options = {}) {
+  // Telegram caps captions at 1024 characters; the overflow goes out as text.
+  const [first, ...remainders] = buildTelegramMessages(caption, {
+    markdown: isMarkdownEnabled(options),
+    limit: 1024,
+  });
+
+  let result;
+  try {
+    result = await sendTelegramMedia(method, field, chatId, descriptor, first ? first.text : '', first && first.parseMode);
+  } catch (error) {
+    if (!first || !first.parseMode || !isEntityParseError(error)) throw error;
+    log.warn('[telegram] Caption formatting rejected by Telegram; resending as plain text', { chatId, error: error.description });
+    result = await sendTelegramMedia(method, field, chatId, descriptor, first.source);
+  }
+  for (const remainder of remainders) {
+    await sendTextPart(chatId, remainder);
   }
   return result;
 }
 
-async function sendPhoto(chatId, descriptor, caption) {
+async function sendPhoto(chatId, descriptor, caption, options) {
   try {
-    return await sendMediaPart('sendPhoto', 'photo', chatId, descriptor, caption);
+    return await sendMediaPart('sendPhoto', 'photo', chatId, descriptor, caption, options);
   } catch (error) {
     if (error.status !== 400) throw error;
-    return sendMediaPart('sendDocument', 'document', chatId, descriptor, caption);
+    return sendMediaPart('sendDocument', 'document', chatId, descriptor, caption, options);
   }
 }
 
-async function sendDocument(chatId, descriptor, caption) {
-  return sendMediaPart('sendDocument', 'document', chatId, descriptor, caption);
+async function sendDocument(chatId, descriptor, caption, options) {
+  return sendMediaPart('sendDocument', 'document', chatId, descriptor, caption, options);
 }
 
-async function sendVideo(chatId, descriptor, caption) {
-  return sendMediaPart('sendVideo', 'video', chatId, descriptor, caption);
+async function sendVideo(chatId, descriptor, caption, options) {
+  return sendMediaPart('sendVideo', 'video', chatId, descriptor, caption, options);
 }
 
-async function sendAudio(chatId, descriptor, caption) {
-  return sendMediaPart('sendAudio', 'audio', chatId, descriptor, caption);
+async function sendAudio(chatId, descriptor, caption, options) {
+  return sendMediaPart('sendAudio', 'audio', chatId, descriptor, caption, options);
 }
 
-async function sendVoice(chatId, descriptor, caption) {
-  return sendMediaPart('sendVoice', 'voice', chatId, descriptor, caption);
+async function sendVoice(chatId, descriptor, caption, options) {
+  return sendMediaPart('sendVoice', 'voice', chatId, descriptor, caption, options);
 }
 
-async function sendAnimation(chatId, descriptor, caption) {
-  return sendMediaPart('sendAnimation', 'animation', chatId, descriptor, caption);
+async function sendAnimation(chatId, descriptor, caption, options) {
+  return sendMediaPart('sendAnimation', 'animation', chatId, descriptor, caption, options);
 }
 
-async function sendMedia(chatId, descriptor, caption) {
+async function sendMedia(chatId, descriptor, caption, options) {
   const senders = { image: sendPhoto, animation: sendAnimation, document: sendDocument,
     video: sendVideo, audio: sendAudio, voice: sendVoice };
   const sender = senders[descriptor && descriptor.kind] || sendDocument;
-  return sender(chatId, descriptor, caption);
+  return sender(chatId, descriptor, caption, options);
 }
 
 async function setWebhook(webhookUrl = ENV.telegramWebhookUrl) {

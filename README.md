@@ -98,6 +98,7 @@ Personal Access Token thay cho username/password.
 | `TELEGRAM_WEBHOOK_URL` | Khi dùng helper | URL public của `/webhook/telegram` |
 | `TELEGRAM_ALLOWED_CHAT_IDS` | Không | Danh sách chat ID, phân cách bằng dấu phẩy |
 | `TELEGRAM_MAX_DOCUMENT_BYTES` | Không | Giới hạn document, mặc định 100 MB |
+| `TELEGRAM_RENDER_MARKDOWN` | Không | Mặc định `true`; đặt `false` để gửi tin agent dạng text thô |
 | `ROCKETCHAT_POLL_INTERVAL_MS` | Không | Chu kỳ polling Rocket.Chat, tối thiểu 10000 ms |
 
 `TELEGRAM_ALLOWED_CHAT_IDS` để trống nghĩa là cho phép mọi chat ID.
@@ -193,6 +194,33 @@ POST /webhook/telegram
 ```
 
 Request không có secret hoặc có secret sai trả `401` và không được xử lý.
+
+## Định dạng tin nhắn agent → Telegram
+
+Tin nhắn của agent (và caption kèm file) được chuyển từ Markdown của
+Rocket.Chat sang HTML của Telegram (`parse_mode: "HTML"`):
+
+| Rocket.Chat | Telegram |
+|---|---|
+| `*đậm*` hoặc `**đậm**` | **đậm** |
+| `_nghiêng_` hoặc `__nghiêng__` | _nghiêng_ |
+| `~gạch~` hoặc `~~gạch~~` | ~~gạch~~ |
+| `` `code` `` | code inline |
+| ```` ```code``` ```` (có thể kèm ngôn ngữ) | khối code |
+| `[nhãn](https://...)` | liên kết (chỉ `http`, `https`, `tg`, `mailto`) |
+
+Nguyên tắc:
+
+- Không định dạng bên trong code; `snake_case_name`, `2 * 3 * 4`, URL chứa `_`
+  được giữ nguyên.
+- Cú pháp lồng sai hoặc không hợp lệ với Telegram tự động hạ cấp về text, không
+  làm mất tin nhắn. Nếu Telegram vẫn trả lỗi parse entities, bridge gửi lại đúng
+  nội dung đó dạng text thường một lần.
+- Chỉ tin của agent được render. Tin hệ thống, thông báo bridge và câu trả lời AI
+  luôn gửi nguyên văn.
+- Tin dài được tách theo nguồn Markdown (giới hạn 4096 ký tự, caption 1024) và
+  fence ``` bị cắt giữa chừng được đóng/mở lại ở chunk kế tiếp.
+- Đặt `TELEGRAM_RENDER_MARKDOWN=false` để tắt hoàn toàn và quay về text thô.
 
 ## Facebook Messenger
 
