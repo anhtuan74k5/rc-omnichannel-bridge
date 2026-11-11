@@ -26,6 +26,7 @@ const documents = require('./documents');
 const { CHANNELS, DEFAULTS, ENV } = require('./constants/config');
 const { MESSAGES } = require('./constants/messages');
 const { dumpRocketChatMessage } = require('./debugDump');
+const { rcTimestampsToPlainText } = require('./textFormat');
 const { downloadRocketChatFile, isPermanentDownloadError } = require('./media/rocketchatFiles');
 const { downloadTelegramFile, isTelegramFileTooLarge } = require('./media/telegramFiles');
 
@@ -524,7 +525,8 @@ async function pollAgentMessages() {
 
         try {
           if (entry.platform === 'facebook') {
-            await facebook.sendMessage(entry.platformUserId, text);
+            // Facebook has no date entity: send timestamps as readable text.
+            await facebook.sendMessage(entry.platformUserId, rcTimestampsToPlainText(text, { timeZone: ENV.timezone }));
           } else if (entry.platform === 'telegram') {
             // Agent text only: render Rocket.Chat Markdown (bold/italic/strike/code).
             await telegram.sendMessage(entry.platformUserId, text, { markdown: true });

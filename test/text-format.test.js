@@ -128,3 +128,52 @@ test('splits long formatted text without breaking code fences', () => {
 test('rcMarkdownToTelegramHtml drops stash markers present in user input', () => {
   assert.equal(rcMarkdownToTelegramHtml('a\uE0000\uE001b'), 'a0b');
 });
+
+// ---- Rocket.Chat timestamps -------------------------------------------------
+
+const { rcTimestampsToPlainText } = require('../textFormat');
+
+const TS = '2026-11-10T13:07:38.825+00:00'; // 20:07 in Asia/Bangkok
+const UNIX = Math.floor(new Date(TS).getTime() / 1000);
+const tzOptions = { timeZone: 'Asia/Bangkok', now: new Date('2026-11-11T00:00:00Z').getTime() };
+
+function renderTs(text) {
+  return buildTelegramMessages(text, { markdown: true, timeOptions: tzOptions })[0];
+}
+
+test('maps every Rocket.Chat timestamp format to a Telegram tg-time entity', () => {
+  const formats = { t: 't', T: 'T', d: 'd', D: 'D', f: 'dt', F: 'wDt', R: 'r' };
+  for (const [rc, tg] of Object.entries(formats)) {
+    const { text, parseMode } = renderTs(`<t:${TS}:${rc}>`);
+    assert.equal(parseMode, 'HTML');
+    assert.match(text, new RegExp(`^<tg-time unix="${UNIX}" format="${tg}">[^<]+</tg-time>$`));
+    assert.equal(isWellFormedTelegramHtml(text), true);
+  }
+});
+
+test('timestamp fallback text uses the bridge timezone', () => {
+  assert.match(renderTs(`<t:${TS}:t>`).text, />20:07</);
+  assert.match(renderTs(`<t:${TS}:f>`).text, />10 tháng 11, 2026 20:07</);
+  assert.match(renderTs(`<t:${TS}:F>`).text, /Thứ Ba/);
+  assert.match(renderTs(`<t:${TS}:R>`).text, /hôm qua|giờ trước/);
+});
+
+test('timestamps work inside formatted text and unix values, but not inside code', () => {
+  const mixed = renderTs(`Họp lúc **<t:${TS}:f>** nhé`);
+  assert.match(mixed.text, /^Họp lúc <b><tg-time unix="\d+" format="dt">.*<\/tg-time><\/b> nhé$/);
+  assert.match(renderTs(`<t:${UNIX}:t>`).text, new RegExp(`unix="${UNIX}"`));
+  assert.equal(renderTs('`<t:' + TS + ':f>`').text, '<code>&lt;t:' + TS + ':f&gt;</code>');
+});
+
+test('timestamp without format defaults to f; invalid or far-future dates degrade to text', () => {
+  assert.match(renderTs(`<t:${TS}>`).text, /format="dt"/);
+  assert.equal(renderTs('<t:2026-13-45T99:99:99:f>').parseMode, undefined);
+  const far = renderTs('<t:2040-01-01T00:00:00Z:f>');
+  assert.equal(far.text.includes('tg-time'), false);
+});
+
+test('plain-text resend and Facebook get readable timestamps, never raw markers', () => {
+  const part = renderTs(`Hẹn <t:${TS}:f>`);
+  assert.equal(part.source, 'Hẹn 10 tháng 11, 2026 20:07');
+  assert.equal(rcTimestampsToPlainText(`<t:${TS}:D>`, tzOptions), '10 tháng 11, 2026');
+});

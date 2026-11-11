@@ -93,12 +93,103 @@ function applyEmphasis(text) {
     .replace(/(?<![\p{L}\p{N}~])~(?=[^\s~])([^\n~]*?[^\s~])~(?![\p{L}\p{N}~])/gu, '<s>$1</s>');
 }
 
+// ---------------------------------------------------------------------------
+// Rocket.Chat timestamps  <t:2026-11-10T13:07:38.825+00:00:f>
+//
+// The composer inserts `<t:ISO_OR_UNIX:FORMAT>`. Telegram has a native
+// date-time entity (HTML: <tg-time unix="..." format="...">fallback</tg-time>)
+// which each reader sees in their own timezone/locale, so it is used when the
+// instant is valid. The element text is a pre-formatted fallback (in the
+// bridge timezone) for clients that do not render the entity, and the same
+// fallback is used for plain-text channels (Facebook, parse-error resend).
+//
+//   RC  t  T  d  D  f   F    R
+//   TG  t  T  d  D  dt  wDt  r      (Telegram format string: r | w?[dD]?[tT]?)
+// ---------------------------------------------------------------------------
+
+const TIMESTAMP_PATTERN = /<t:(\d{4}-\d{2}-\d{2}T[^>\s]*?|\d{9,13})(?::([tTdDfFR]))?>/g;
+const TELEGRAM_TIME_FORMATS = Object.freeze({ t: 't', T: 'T', d: 'd', D: 'D', f: 'dt', F: 'wDt', R: 'r' });
+// Telegram accepts unix dates from 0 up to now + 1098 days.
+const TELEGRAM_MAX_FUTURE_MS = 1090 * 24 * 60 * 60 * 1000;
+const DEFAULT_TIME_LOCALE = 'vi-VN';
+const DEFAULT_TIME_ZONE = 'Asia/Bangkok';
+
+function parseRcTimestamp(raw) {
+  const value = /^\d+$/.test(raw)
+    ? new Date(raw.length <= 10 ? Number(raw) * 1000 : Number(raw))
+    : new Date(raw);
+  return Number.isNaN(value.getTime()) ? null : value;
+}
+
+function resolveTimeOptions(options = {}) {
+  const timeZone = options.timeZone || process.env.TZ || DEFAULT_TIME_ZONE;
+  try {
+    new Intl.DateTimeFormat(DEFAULT_TIME_LOCALE, { timeZone });
+    return { locale: options.locale || DEFAULT_TIME_LOCALE, timeZone, now: options.now };
+  } catch (err) {
+    return { locale: options.locale || DEFAULT_TIME_LOCALE, timeZone: DEFAULT_TIME_ZONE, now: options.now };
+  }
+}
+
+function formatRelative(date, locale, now) {
+  const diffSeconds = Math.round((date.getTime() - now) / 1000);
+  const units = [['year', 31536000], ['month', 2592000], ['day', 86400], ['hour', 3600], ['minute', 60]];
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+  for (const [unit, seconds] of units) {
+    if (Math.abs(diffSeconds) >= seconds) return rtf.format(Math.round(diffSeconds / seconds), unit);
+  }
+  return rtf.format(diffSeconds, 'second');
+}
+
+/** Human-readable text for one timestamp, in the bridge timezone. */
+function formatTimestampText(date, format = 'f', options = {}) {
+  const { locale, timeZone, now } = resolveTimeOptions(options);
+  const fmt = (opts) => new Intl.DateTimeFormat(locale, { timeZone, ...opts }).format(date);
+  const time = { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' };
+  const longDate = { day: 'numeric', month: 'long', year: 'numeric' };
+  switch (format) {
+    case 't': return fmt(time);
+    case 'T': return fmt({ ...time, second: '2-digit' });
+    case 'd': return fmt({ day: '2-digit', month: '2-digit', year: 'numeric' });
+    case 'D': return fmt(longDate);
+    case 'F': return `${fmt({ weekday: 'long', ...longDate })} ${fmt(time)}`;
+    case 'R': return formatRelative(date, locale, now === undefined ? Date.now() : now);
+    case 'f':
+    default: return `${fmt(longDate)} ${fmt(time)}`;
+  }
+}
+
+/** Replace every <t:...> with readable text (plain-text channels / fallbacks). */
+function rcTimestampsToPlainText(text, options = {}) {
+  return String(text || '').replace(TIMESTAMP_PATTERN, (match, raw, format) => {
+    const date = parseRcTimestamp(raw);
+    return date ? formatTimestampText(date, format || 'f', options) : match;
+  });
+}
+
+/** Telegram HTML for one timestamp, or null when it must degrade to plain text. */
+function timestampToTelegramHtml(raw, format, options = {}) {
+  const date = parseRcTimestamp(raw);
+  if (!date) return null;
+  const fallback = escapeHtml(formatTimestampText(date, format || 'f', options));
+  const ms = date.getTime();
+  const { now } = resolveTimeOptions(options);
+  const inRange = ms >= 0 && ms <= (now === undefined ? Date.now() : now) + TELEGRAM_MAX_FUTURE_MS;
+  if (!inRange) return { html: fallback, plain: fallback };
+  const unix = Math.floor(ms / 1000);
+  const tgFormat = TELEGRAM_TIME_FORMATS[format || 'f'];
+  return {
+    html: `<tg-time unix="${unix}" format="${tgFormat}">${fallback}</tg-time>`,
+    plain: fallback,
+  };
+}
+
 /**
  * Convert Rocket.Chat Markdown into Telegram-flavoured HTML.
  * Code spans/blocks and URLs are stashed first so that nothing inside them is
  * ever treated as formatting (e.g. snake_case_names, https://x.com/a_b_c).
  */
-function rcMarkdownToTelegramHtml(source, { emphasis = true } = {}) {
+function rcMarkdownToTelegramHtml(source, { emphasis = true, timeOptions } = {}) {
   const stash = [];
   const hold = (html, plain) => {
     stash.push({ html, plain: plain === undefined ? html : plain });
@@ -125,6 +216,12 @@ function rcMarkdownToTelegramHtml(source, { emphasis = true } = {}) {
     code.trim() ? hold(`<code>${escapeHtml(code)}</code>`, escapeHtml(code)) : match
   ));
 
+  // Timestamps are held before escaping: `<t:...>` would otherwise become `&lt;t:...&gt;`.
+  text = text.replace(TIMESTAMP_PATTERN, (match, raw, format) => {
+    const rendered = timestampToTelegramHtml(raw, format, timeOptions);
+    return rendered ? hold(rendered.html, rendered.plain) : match;
+  });
+
   text = escapeHtml(text);
 
   text = text.replace(SAFE_LINK_PATTERN, (match, label, url) => {
@@ -141,7 +238,7 @@ function rcMarkdownToTelegramHtml(source, { emphasis = true } = {}) {
   return restore(text, 'html');
 }
 
-const SELF_CONTAINED_TAGS = new Set(['code', 'pre', 'a']);
+const SELF_CONTAINED_TAGS = new Set(['code', 'pre', 'a', 'tg-time']);
 
 /**
  * Structural check for the small tag subset we emit. Telegram rejects the
@@ -150,7 +247,7 @@ const SELF_CONTAINED_TAGS = new Set(['code', 'pre', 'a']);
  */
 function isWellFormedTelegramHtml(html) {
   const stack = [];
-  const tagPattern = /<(\/?)(b|i|s|code|pre|a)(?:\s[^>]*)?>/g;
+  const tagPattern = /<(\/?)(b|i|s|code|pre|a|tg-time)(?:\s[^>]*)?>/g;
   let match;
   while ((match = tagPattern.exec(html)) !== null) {
     const [, closing, tag] = match;
@@ -161,7 +258,7 @@ function isWellFormedTelegramHtml(html) {
     const top = stack[stack.length - 1];
     if (tag === 'pre' && stack.length > 0) return false;
     if (tag === 'code' && !(stack.length === 0 || (stack.length === 1 && top === 'pre'))) return false;
-    if (tag === 'a' && stack.some((open) => SELF_CONTAINED_TAGS.has(open))) return false;
+    if ((tag === 'a' || tag === 'tg-time') && stack.some((open) => SELF_CONTAINED_TAGS.has(open))) return false;
     if ((tag === 'b' || tag === 'i' || tag === 's') && stack.some((open) => open === 'code' || open === 'pre')) {
       return false;
     }
@@ -175,9 +272,9 @@ function isWellFormedTelegramHtml(html) {
  * formatting (callers then send plain text, with no parse_mode at all).
  * Degrades in tiers: full formatting -> code/links only -> plain text.
  */
-function toTelegramHtml(source) {
-  let html = rcMarkdownToTelegramHtml(source);
-  if (!isWellFormedTelegramHtml(html)) html = rcMarkdownToTelegramHtml(source, { emphasis: false });
+function toTelegramHtml(source, timeOptions) {
+  let html = rcMarkdownToTelegramHtml(source, { timeOptions });
+  if (!isWellFormedTelegramHtml(html)) html = rcMarkdownToTelegramHtml(source, { emphasis: false, timeOptions });
   if (!isWellFormedTelegramHtml(html)) return null;
   return html.includes('<') ? html : null;
 }
@@ -224,13 +321,16 @@ function splitPreservingFences(text, maxLength) {
  *
  * @returns {Array<{text: string, parseMode?: 'HTML', source: string}>}
  */
-function buildTelegramMessages(text, { markdown = false, limit = 4096 } = {}) {
+function buildTelegramMessages(text, { markdown = false, limit = 4096, timeOptions } = {}) {
   const converted = convertOutsideCode(text, replaceShortcodes);
   if (!markdown) {
     return splitTelegramText(converted, limit).map((part) => ({ text: part, source: part }));
   }
-  return splitPreservingFences(converted, limit).map((source) => {
-    const html = toTelegramHtml(source);
+  return splitPreservingFences(converted, limit).map((chunk) => {
+    const html = toTelegramHtml(chunk, timeOptions);
+    // `source` is what gets resent as plain text if Telegram rejects the HTML,
+    // so raw <t:...> markers are already turned into readable dates there.
+    const source = rcTimestampsToPlainText(chunk, timeOptions);
     return html ? { text: html, parseMode: 'HTML', source } : { text: source, source };
   });
 }
@@ -242,7 +342,9 @@ function telegramToRcText(text) {
 module.exports = {
   buildTelegramMessages,
   isWellFormedTelegramHtml,
+  formatTimestampText,
   rcMarkdownToTelegramHtml,
+  rcTimestampsToPlainText,
   rcToTelegramText,
   splitTelegramText,
   telegramToRcText,
