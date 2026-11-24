@@ -423,8 +423,23 @@ Thứ tự theo giá trị và phụ thuộc. Mỗi gói kèm test mới; không
 | W6 | Phân loại lỗi gửi ra, tin hệ thống vào phòng khi bỏ cuộc, trạng thái token | G7, G15 | 1 ngày | W0 |
 | W7 | Tên khách, log độ trễ, mở rộng `/health`, bỏ log nội dung AI | G9–G11 | 0,5 ngày | — |
 | W8 | Giới hạn body webhook, rate limit theo khách, tắt route TG khi polling | G12, G13, G18 | 0,5 ngày | — |
-| W9 | Omnichat webhook của Rocket.Chat thay polling (giữ polling dự phòng) | G1 (dài hạn) | 1–2 ngày | W1 |
+| W9 | Omnichannel webhook của Rocket.Chat thay polling (giữ polling dự phòng) | G1 (dài hạn) | 1–2 ngày | W1; **đã code + test (86/86), chưa bật trên Rocket.Chat thật, xem 6.1** |
 | W10 | Chính sách `edited_message` và các mục P3 được chọn | G8, P3 | tùy chọn | — |
+
+### 6.1 W9: trạng thái
+
+- Mã: `rcWebhook.js` (xác thực token bằng `timingSafeEqual`, ánh xạ payload, theo dõi "webhook sống",
+  quyết định lúc nào polling chạy), route `POST /webhook/rocketchat`, và `deliverAgentMessages` trong
+  `index.js` (đường gửi cũ của polling, tách ra dùng chung cho cả hai nguồn; mỗi khách một hàng đợi,
+  bỏ qua id đã xử lý nên webhook và polling không gửi trùng).
+- Payload đối chiếu từ mã nguồn Rocket.Chat 8.9.0 (`sendToCRM`): `type: "Message"` + `messages[0].agentId`,
+  `LivechatSession` + `closedAt` khi đóng, header `X-RocketChat-Livechat-Token`. Đóng phòng giao cho
+  polling (thấy cả tin đang chờ retry).
+- Test: `test/rc-webhook.test.js` (payload mẫu, token, loại trùng webhook/polling/gửi lại, đua nhau,
+  nhịp polling dự phòng và tự bật lại khi webhook im lặng).
+- **Chưa làm (sửa admin Rocket.Chat, cần bạn duyệt):** nhập Webhook URL + Secret token và bật "agent
+  message" (guide.md mục 10.1), rồi đo lại T-P03/T-P04 (mục tiêu agent → khách p95 ≤ 3 s, ≈ 0 call
+  `messages.history` khi rảnh).
 
 Mỗi gói: viết test trước/cùng lúc, chạy `npm test`, cập nhật `README.md`, `guide.md`,
 `.env.example`; không động tới `.env`.

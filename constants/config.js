@@ -32,6 +32,9 @@ const DEFAULTS = Object.freeze({
   // Rocket.Chat's default API limit is 10 calls/60 s per endpoint; stay below it.
   rocketChatPollMaxCallsPerMinute: 8,
   rocketChatHotWindowMs: 10 * 60 * 1000,
+  // Webhook alive: poll only this often; silent for longer than the other value: poll at full rate.
+  rocketChatWebhookFallbackPollMs: 60 * 1000,
+  rocketChatWebhookSilenceMs: 5 * 60 * 1000,
   telegramWebhookPath: '/webhook/telegram',
 });
 
@@ -120,6 +123,16 @@ const ENV = Object.freeze({
   departmentId: process.env.ROCKETCHAT_DEPARTMENT_ID || '',
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
   telegramWebhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET || '',
+  // Rocket.Chat Omnichannel webhook (X-RocketChat-Livechat-Token); empty = webhook disabled.
+  rocketChatWebhookSecret: process.env.ROCKETCHAT_WEBHOOK_SECRET || '',
+  rocketChatWebhookSilenceMs: Math.max(
+    10000,
+    Number(process.env.ROCKETCHAT_WEBHOOK_SILENCE_MS || DEFAULTS.rocketChatWebhookSilenceMs)
+  ),
+  rocketChatWebhookFallbackPollMs: Math.max(
+    10000,
+    Number(process.env.ROCKETCHAT_WEBHOOK_FALLBACK_POLL_MS || DEFAULTS.rocketChatWebhookFallbackPollMs)
+  ),
   telegramWebhookUrl: process.env.TELEGRAM_WEBHOOK_URL || '',
   telegramAllowedChatIds: (process.env.TELEGRAM_ALLOWED_CHAT_IDS || '')
     .split(',')
