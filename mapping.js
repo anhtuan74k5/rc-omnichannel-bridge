@@ -23,7 +23,9 @@
 const fs = require('fs');
 const path = require('path');
 
-const MAPPING_FILE = path.join(__dirname, 'mapping.json');
+// MAPPING_FILE lets tests (or a second deployment) use a different store.
+const MAPPING_FILE = process.env.MAPPING_FILE || path.join(__dirname, 'mapping.json');
+const MAX_INBOUND_IDS = 100;
 
 let store = { entries: [] };
 
@@ -35,6 +37,7 @@ function load() {
       if (!Array.isArray(store.entries)) store.entries = [];
       store.entries.forEach((entry) => {
         if (!Array.isArray(entry.processedMessageIds)) entry.processedMessageIds = [];
+        if (!Array.isArray(entry.processedInboundIds)) entry.processedInboundIds = [];
       });
       console.log(`[mapping] Loaded ${store.entries.length} mapping entries from ${MAPPING_FILE}`);
     } else {
@@ -100,6 +103,7 @@ function getOrCreate(platform, platformUserId) {
     roomId: null,
     lastMessageTimestamp: 0,
     processedMessageIds: [],
+    processedInboundIds: [],
     active: true,
   };
   store.entries.push(entry);
@@ -117,6 +121,20 @@ function update(entry, fields) {
 }
 
 /**
+ * Inbound de-duplication: platforms may redeliver the same message (Meta
+ * retries webhooks). Remembers the last MAX_INBOUND_IDS platform message keys.
+ */
+function hasProcessedInbound(entry, key) {
+  return Array.isArray(entry.processedInboundIds) && entry.processedInboundIds.includes(key);
+}
+
+function markInboundProcessed(entry, key) {
+  const ids = Array.isArray(entry.processedInboundIds) ? entry.processedInboundIds : [];
+  if (!ids.includes(key)) ids.push(key);
+  update(entry, { processedInboundIds: ids.slice(-MAX_INBOUND_IDS) });
+}
+
+/**
  * Return all active entries (used by the polling loop).
  */
 function getActiveEntries() {
@@ -131,5 +149,7 @@ module.exports = {
   findByRoomId,
   getOrCreate,
   update,
+  hasProcessedInbound,
+  markInboundProcessed,
   getActiveEntries,
 };

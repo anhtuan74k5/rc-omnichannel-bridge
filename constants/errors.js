@@ -12,6 +12,11 @@ const ERRORS = {
   },
   facebook: {
     sendFailed: (status, data) => `Facebook send failed (${status}): ${JSON.stringify(data)}`,
+    tokenMissing: 'FB_PAGE_ACCESS_TOKEN is missing',
+    mediaInvalidBuffer: 'media buffer must be a non-empty Buffer',
+    mediaUrlRejected: 'FACEBOOK_MEDIA_URL_REJECTED: attachment URL is not an allowed Facebook CDN host',
+    mediaTooLarge: (maxBytes) => `FACEBOOK_MEDIA_TOO_LARGE: file exceeds ${maxBytes} bytes`,
+    mediaDownloadFailed: (status) => `Facebook media download failed (${status})`,
   },
   rocketchat: {
     api: (status, text) => `Rocket.Chat API error ${status}: ${text}`,

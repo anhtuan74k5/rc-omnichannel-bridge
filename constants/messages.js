@@ -6,6 +6,9 @@ const MESSAGES = {
       caption && caption.trim() ? ` Caption: "${caption.trim()}"` : '',
     telegramUnsupportedRoomMessage: (messageType, captionText) =>
       `[Telegram ${messageType}] User sent a ${messageType} message.${captionText} This bridge currently forwards text and supported documents only.`,
+    deliveryFailed: (platform, what, reason) =>
+      `⚠️ [Bridge] Không gửi được ${what} tới khách trên ${platform}: ${reason}.`,
+    editedForRoom: (text) => `✏️ (khách đã sửa tin) ${text}`,
     aiReplyForRoom: (reply) => `🤖 AI: ${reply}`,
     aiHandoffForRoom: (message) => `🤖 AI: ${message}`,
     liveLookupContext: (context) =>
@@ -106,6 +109,8 @@ Respond ONLY with a JSON object, no other text:
 {"handled": true, "reply": "your answer here"}
 or
 {"handled": false}`,
+    resumed: 'Trợ lý AI đã được bật lại. Bạn có thể tiếp tục đặt câu hỏi.',
+    resumedForRoom: '🤖 Khách đã bật lại trợ lý AI bằng lệnh /bot.',
     runtimeDateTime: (dateTime) => `Current server date/time: ${dateTime}`,
     runtimeTimezone: (timezone) => `Timezone: ${timezone}`,
     liveLookupResult: (context) =>
@@ -123,6 +128,17 @@ or
     mediaUploadFailed: 'Sorry, I could not upload this media right now. Please try again later.',
     mediaUploadStatus: (type, filename, reason) =>
       `[Telegram ${type}] Failed to upload "${filename}" to Rocket.Chat: ${reason}`,
+  },
+  facebook: {
+    mediaTooLarge: 'This file is too large. Please send a file up to 25 MB.',
+    mediaUploadFailed: 'Sorry, I could not upload this file right now. Please try again later.',
+    mediaDeliveryFailed: 'Sorry, I could not deliver one of the support files right now. Please try again later.',
+    mediaUploadStatus: (type, filename, reason) =>
+      `[Facebook ${type}] Failed to upload "${filename}" to Rocket.Chat: ${reason}`,
+    unsupportedRoomMessage: (type) =>
+      `[Facebook ${type}] User sent a ${type} message that this bridge cannot forward.`,
+    locationRoomMessage: (title, url) =>
+      `[Facebook location] ${title ? `${title}: ` : ''}${url}`,
   },
   liveLookup: {
     weatherLocationPrompt: 'Which location would you like the weather for? For example: "What is the weather like in Hanoi today?"',

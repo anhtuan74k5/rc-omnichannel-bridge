@@ -10,8 +10,12 @@ const DEFAULTS = Object.freeze({
   requestBodyLimit: '2mb',
   telegramMaxDocumentBytes: 100 * 1024 * 1024,
   telegramMaxMediaBytes: 20 * 1024 * 1024,
+  // Messenger Send API accepts attachments up to 25 MB.
+  facebookMaxMediaBytes: 25 * 1024 * 1024,
   aiBaseUrl: 'https://api.openai.com/v1',
   aiModel: 'gpt-4o-mini',
+  aiResumeAfterMinutes: 30,
+  aiTimeoutMs: 30000,
   timezone: 'Asia/Bangkok',
   documentChunkSize: 1200,
   documentChunkOverlap: 150,
@@ -23,6 +27,9 @@ const DEFAULTS = Object.freeze({
   telegramMaxUpdateRetries: 3,
   rocketChatMaxMessageRetries: 3,
   rocketChatPollIntervalMs: 10000,
+  // Rocket.Chat's default API limit is 10 calls/60 s per endpoint; stay below it.
+  rocketChatPollMaxCallsPerMinute: 8,
+  rocketChatHotWindowMs: 10 * 60 * 1000,
   telegramWebhookPath: '/webhook/telegram',
 });
 
@@ -113,6 +120,11 @@ const ENV = Object.freeze({
   adminApiKey: process.env.ADMIN_API_KEY || '',
   facebookPageAccessToken: process.env.FB_PAGE_ACCESS_TOKEN || '',
   facebookVerifyToken: process.env.FB_VERIFY_TOKEN || '',
+  // App Secret used to verify X-Hub-Signature-256 on incoming webhooks.
+  facebookAppSecret: process.env.FB_APP_SECRET || '',
+  facebookMaxMediaBytes: Number(
+    process.env.FB_MAX_MEDIA_BYTES || DEFAULTS.facebookMaxMediaBytes
+  ),
   debugPolling: process.env.DEBUG_POLLING === 'true',
   debugDumpPayloads: process.env.DEBUG_DUMP_PAYLOADS === 'true',
   telegramMaxDocumentBytes: Number(
@@ -135,6 +147,12 @@ const ENV = Object.freeze({
   aiModel: process.env.AI_MODEL || DEFAULTS.aiModel,
   aiBusinessContext: (process.env.AI_BUSINESS_CONTEXT || '').trim(),
   aiHandoffMessage: process.env.AI_HANDOFF_MESSAGE || '',
+  aiTimeoutMs: Number(process.env.AI_TIMEOUT_MS || DEFAULTS.aiTimeoutMs),
+  // After a handoff or an agent reply the AI stays silent in that room for this long.
+  aiResumeAfterMs: Math.max(
+    0,
+    Number(process.env.AI_RESUME_AFTER_MINUTES || DEFAULTS.aiResumeAfterMinutes) * 60 * 1000
+  ),
   timezone: process.env.TZ || DEFAULTS.timezone,
   documentChunkSize: Number(process.env.DOCUMENT_CHUNK_SIZE || DEFAULTS.documentChunkSize),
   documentChunkOverlap: Number(process.env.DOCUMENT_CHUNK_OVERLAP || DEFAULTS.documentChunkOverlap),
@@ -156,6 +174,14 @@ const ENV = Object.freeze({
   rocketChatPollIntervalMs: Math.max(
     10000,
     Number(process.env.ROCKETCHAT_POLL_INTERVAL_MS || DEFAULTS.rocketChatPollIntervalMs)
+  ),
+  rocketChatPollMaxCallsPerMinute: Math.max(
+    1,
+    Number(process.env.ROCKETCHAT_POLL_MAX_CALLS_PER_MINUTE || DEFAULTS.rocketChatPollMaxCallsPerMinute)
+  ),
+  rocketChatHotWindowMs: Math.max(
+    0,
+    Number(process.env.ROCKETCHAT_HOT_WINDOW_MS || DEFAULTS.rocketChatHotWindowMs)
   ),
 });
 
