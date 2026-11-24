@@ -312,14 +312,30 @@ Bridge trả `200` ngay sau khi kiểm tra chữ ký, rồi xử lý trong hàng
 - Webhook cần đăng ký field `messages` (và `message_echoes` là không bắt buộc;
   tin echo luôn bị bỏ qua).
 
+### Rocket.Chat Omnichannel webhook (agent → khách gần như tức thì)
+
+Thay vì chờ polling, Rocket.Chat có thể đẩy từng tin agent tới `POST /webhook/rocketchat`.
+Bridge xác thực bằng header `X-RocketChat-Livechat-Token`, trả `200` ngay rồi gửi tin tới
+khách bằng đúng đường gửi của polling (cùng phân loại lỗi, tin hệ thống khi gửi thất bại,
+tạm dừng AI khi agent trả lời). Polling vẫn chạy làm dự phòng: chậm lại khi webhook sống,
+nhanh như cũ khi webhook im lặng quá ngưỡng. Một tin không bao giờ gửi hai lần (dùng chung
+id đã xử lý và hàng đợi theo từng khách). Cách cấu hình: `guide.md` mục 10.
+
+| Biến | Bắt buộc | Mô tả |
+|---|---|---|
+| `ROCKETCHAT_WEBHOOK_SECRET` | Không | Secret token khớp với Rocket.Chat (Omnichannel → Webhooks). Để trống = tắt webhook |
+| `ROCKETCHAT_WEBHOOK_SILENCE_MS` | Không | Im lặng quá khoảng này thì coi webhook là hỏng và polling nhanh trở lại, mặc định 300000 |
+| `ROCKETCHAT_WEBHOOK_FALLBACK_POLL_MS` | Không | Chu kỳ polling dự phòng khi webhook sống, mặc định 60000 |
+
 ## API của bridge
 
 | Phương thức | Đường dẫn | Mục đích |
 |---|---|---|
-| `GET` | `/health` | Kiểm tra trạng thái và số room đang hoạt động |
+| `GET` | `/health` | Trạng thái, số room đang hoạt động, tình trạng webhook Rocket.Chat |
 | `GET` | `/webhook/facebook` | Xác minh webhook Facebook |
 | `POST` | `/webhook/facebook` | Nhận sự kiện Facebook |
 | `POST` | `/webhook/telegram` | Nhận update Telegram |
+| `POST` | `/webhook/rocketchat` | Nhận sự kiện Omnichannel của Rocket.Chat (cần `ROCKETCHAT_WEBHOOK_SECRET`) |
 | `POST` | `/documents/upload` | Upload tài liệu cho một user |
 | `GET` | `/documents` | Liệt kê tài liệu của một user |
 
@@ -475,6 +491,7 @@ index.js                 Express server, route và vòng polling
 telegram.js              Telegram webhook, polling và gửi media
 facebook.js              Facebook webhook và gửi text
 rocketchat.js            Rocket.Chat Livechat API
+rcWebhook.js              Nhận webhook Omnichannel, nhịp polling dự phòng
 textFormat.js            Chuẩn hóa text, shortcode và tách grapheme
 documents.js              Lưu/index tài liệu theo từng user
 mapping.js                Lưu mapping visitor và room

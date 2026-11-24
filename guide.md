@@ -181,7 +181,7 @@ hồi.
 | Log bridge: `Rejected webhook with missing or invalid signature` | `FB_APP_SECRET` sai, hoặc app Meta khác | So lại mục 3, khởi động lại bridge sau khi sửa `.env` |
 | Trình duyệt mở URL ngrok ra trang cảnh báo ngrok | Bình thường với gói free khi mở bằng trình duyệt; Meta gọi webhook không bị ảnh hưởng | Bỏ qua |
 | Log bridge: `Rocket.Chat API error 429 … wait 10 seconds` lặp lại | Gọi `messages.history` vượt giới hạn của Rocket.Chat | Bản mới tự chia ngân sách giữa các phòng. Muốn nhanh hơn: Rocket.Chat Administration > Settings > Rate Limiter > API tăng giới hạn, rồi tăng `ROCKETCHAT_POLL_MAX_CALLS_PER_MINUTE` trong `.env` và khởi động lại bridge |
-| Agent trả lời nhưng khách nhận chậm (khoảng 10 giây trở lên) | Polling: độ trễ = chu kỳ × số phòng ít hoạt động | Bình thường với polling; phòng đang chat được ưu tiên. Giải pháp tận gốc là dùng Omnichannel webhook (xem PLAN.md, G1) |
+| Agent trả lời nhưng khách nhận chậm (khoảng 10 giây trở lên) | Polling: độ trễ = chu kỳ × số phòng ít hoạt động | Bình thường với polling; phòng đang chat được ưu tiên. Giải pháp tận gốc là Omnichannel webhook của Rocket.Chat (mục 10) |
 | Log bridge: `EADDRINUSE ... port: 3001` | Đang có một bản bridge khác giữ cổng | Chạy `scripts\restart-bridge.ps1` (tự dừng bản cũ) |
 | Khách nhắn nhưng AI không trả lời | AI đang im vì agent đã nhận cuộc trò chuyện (30 phút) | Khách gõ `/bot`, hoặc chờ hết `AI_RESUME_AFTER_MINUTES` |
 | Phòng có dòng `⚠️ [Bridge] Không gửi được …` | Lỗi gửi vĩnh viễn (khách chặn, ngoài 24 giờ…) hoặc token hỏng | Đọc lý do trong dòng đó; token hỏng thì làm lại mục 2 |
@@ -191,7 +191,69 @@ hồi.
 | Gửi ra Messenger lỗi `code 10` / `(#200)` | Ngoài cửa sổ 24 giờ hoặc thiếu quyền | Khách phải nhắn trước; kiểm tra quyền `pages_messaging` |
 | Ảnh/file khách gửi không vào Rocket.Chat | File > 25 MB, hoặc URL không thuộc CDN Facebook | Xem log `[facebook] Failed to handle`; đổi `FB_MAX_MEDIA_BYTES` nếu cần |
 
-## 10. Điều khiển Claude từ điện thoại (Remote Control)
+## 10. Rocket.Chat Omnichannel webhook (agent → khách trong < 3 giây)
+
+Mặc định bridge hỏi Rocket.Chat tối đa 8 lần/phút bằng polling nên tin agent tới khách chậm
+10–30 giây. Với webhook, Rocket.Chat tự đẩy từng tin agent tới bridge ngay khi agent gửi.
+Polling vẫn chạy làm dự phòng (xem 10.2).
+
+Đã đọc từ mã nguồn Rocket.Chat 8.9.0 (Docker `rocketchat-compose-2.0.0`, chỉ đọc):
+Rocket.Chat gọi `POST <URL webhook>` với JSON, header `X-RocketChat-Livechat-Token` chứa
+**Secret token**; chỉ coi là thành công khi bridge trả `200` (5xx/429 thì thử lại tối đa 5 lần).
+
+| Tùy chọn trong Rocket.Chat | `type` trong payload | Bridge làm gì |
+|---|---|---|
+| Send request on agent message | `Message`, `messages[0].agentId` có giá trị | Gửi tin/file tới khách ngay (cùng đường gửi với polling) |
+| Send request on visitor message (tùy chọn) | `Message`, không có `agentId` | Chỉ là tín hiệu "webhook còn sống" |
+| Send request on chat close | `LivechatSession`, có `closedAt` | Polling chạy ngay và đóng phòng |
+| Send request on chat taken / start / forward | `LivechatSessionTaken` / `Start` / `Forwarded` | Chỉ là tín hiệu "còn sống" (không đổi trạng thái AI) |
+
+### 10.1 Bật webhook (làm trên giao diện admin Rocket.Chat, một lần)
+
+1. Sinh một secret ngẫu nhiên riêng cho webhook này:
+   ```powershell
+   [Convert]::ToBase64String([byte[]](1..32 | ForEach-Object { Get-Random -Maximum 256 }))
+   ```
+2. Thêm vào `.env` của bridge rồi khởi động lại bridge (`scripts\restart-bridge.ps1`):
+   ```env
+   ROCKETCHAT_WEBHOOK_SECRET=<secret vừa sinh>
+   ```
+   Khi chạy, log có dòng `[startup] Rocket.Chat webhook: http://localhost:3001/webhook/rocketchat`.
+3. Rocket.Chat: **Administration → Omnichannel → Webhooks**:
+   - **Webhook URL**: `http://host.docker.internal:3001/webhook/rocketchat`
+     (Rocket.Chat chạy trong Docker, bridge chạy trên máy host; đổi `3001` theo `PORT`).
+   - **Secret token**: đúng giá trị `ROCKETCHAT_WEBHOOK_SECRET`.
+   - Bật **Send request on agent message** (bắt buộc).
+   - Nên bật thêm **Send request on visitor message** (làm tín hiệu sống, xem 10.2) và
+     **Send request on chat close**.
+   - Lưu.
+4. Kiểm tra: agent trả lời một tin trong phòng; tin tới khách ngay (không phải đợi chu kỳ
+   polling) và `GET /health` có `rocketChatWebhook.alive: true`.
+
+### 10.2 Cơ chế dự phòng
+
+- Webhook "sống" = bridge nhận một sự kiện hợp lệ trong `ROCKETCHAT_WEBHOOK_SILENCE_MS`
+  (mặc định 5 phút). Khi sống, polling chỉ chạy mỗi `ROCKETCHAT_WEBHOOK_FALLBACK_POLL_MS`
+  (mặc định 60 giây) để bắt tin sót; khi im lặng quá ngưỡng, polling trở lại tốc độ bình thường.
+- Gửi qua webhook thất bại (lỗi tạm thời): polling chạy ngay ở lượt kế tiếp để thử lại.
+- Webhook và polling dùng chung bộ nhớ id tin đã xử lý và một hàng đợi theo từng khách,
+  nên một tin không bao giờ gửi hai lần.
+- Hạn chế: webhook im lặng thật sự (không ai nhắn) trông giống webhook hỏng; bật "visitor
+  message" để tin của khách cũng là một tín hiệu sống. Nếu webhook hỏng giữa lúc đang sống,
+  tin agent trễ tối đa 60 giây (polling dự phòng) và sau 5 phút polling nhanh trở lại.
+- Tin agent do app/blocks sinh ra (Rocket.Chat đóng gói `blocks` thành JSON) không đi qua
+  webhook; polling dự phòng gửi chúng.
+- Muốn tắt: xóa `ROCKETCHAT_WEBHOOK_SECRET` (route trả `503`, polling như cũ).
+
+### 10.3 Sự cố
+
+| Triệu chứng | Nguyên nhân | Cách xử lý |
+|---|---|---|
+| Log `[rc-webhook] Rejected request with missing or invalid token` | Secret token trong Rocket.Chat khác `.env` | Nhập lại cho khớp, khởi động lại bridge |
+| Rocket.Chat không gọi được bridge | URL sai, hoặc dùng `localhost` trong Docker | Dùng `host.docker.internal`; kiểm tra tường lửa cho cổng bridge |
+| `/health` có `alive: false` dù đã cấu hình | Chưa có sự kiện nào trong ngưỡng im lặng | Bật "visitor message", gửi một tin thử |
+
+## 11. Điều khiển Claude từ điện thoại (Remote Control)
 
 Remote Control nối phiên Claude Code trên máy với tài khoản claude.ai của bạn, để
 xem và chỉ đạo phiên từ điện thoại.
@@ -212,7 +274,7 @@ Lưu ý:
 - Các lệnh cần phê duyệt (chạy lệnh, sửa file) vẫn hỏi bạn; duyệt ngay trên điện thoại.
 - Đừng dán token, secret vào khung chat trên điện thoại.
 
-## 11. Khi bí mật bị lộ
+## 12. Khi bí mật bị lộ
 
 - Lộ `FB_PAGE_ACCESS_TOKEN`: ở mục 2 bấm biểu tượng thùng rác (gỡ Page khỏi app)
   rồi thêm lại, tạo token mới; cập nhật `.env`.
