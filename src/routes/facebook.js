@@ -1,6 +1,6 @@
 const express = require('express');
-const facebook = require('../../facebook');
-const { CHANNELS, ENV } = require('../../constants/config');
+const facebook = require('../platforms/facebook');
+const { CHANNELS, ENV } = require('../constants/config');
 const { forwardToRocketChat } = require('../inbound/forwardToRocketChat');
 const { handleFacebookAttachment, enqueueFacebookTask } = require('../inbound/facebook');
 

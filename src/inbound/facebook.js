@@ -2,12 +2,12 @@
  * Incoming Facebook attachments -> Rocket.Chat, and the per-customer task queue.
  */
 
-const mapping = require('../../mapping');
-const rocketchat = require('../../rocketchat');
-const facebook = require('../../facebook');
-const { CHANNELS, ENV } = require('../../constants/config');
-const { MESSAGES } = require('../../constants/messages');
-const { downloadFacebookAttachment, isFacebookFileTooLarge } = require('../../media/facebookFiles');
+const mapping = require('../core/mapping');
+const rocketchat = require('../rocketchat/rocketchat');
+const facebook = require('../platforms/facebook');
+const { CHANNELS, ENV } = require('../constants/config');
+const { MESSAGES } = require('../constants/messages');
+const { downloadFacebookAttachment, isFacebookFileTooLarge } = require('../media/facebookFiles');
 const { facebookQueue, facebookInFlight } = require('../runtime');
 const { ensureRocketChatRoom } = require('./rocketchatRoom');
 const { relayMediaToRocketChat } = require('./mediaPipeline');

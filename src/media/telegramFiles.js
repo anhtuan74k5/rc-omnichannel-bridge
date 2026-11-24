@@ -1,6 +1,6 @@
 const { API, ENV } = require('../constants/config');
 const { ERRORS } = require('../constants/errors');
-const { fetchWithTimeout } = require('../httpClient');
+const { fetchWithTimeout } = require('../lib/httpClient');
 
 const TELEGRAM_FILE_TOO_LARGE = 'TELEGRAM_FILE_TOO_LARGE';
 

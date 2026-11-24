@@ -13,9 +13,9 @@ process.env.AI_ENABLED = 'false';
 process.env.FB_APP_SECRET = 'queue-test-secret';
 process.env.FB_PAGE_ACCESS_TOKEN = 'queue-test-token';
 
-const mapping = require('../mapping');
-const rocketchat = require('../rocketchat');
-const { app, facebookQueue } = require('../index');
+const mapping = require('../src/core/mapping');
+const rocketchat = require('../src/rocketchat/rocketchat');
+const { app, facebookQueue } = require('..');
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 

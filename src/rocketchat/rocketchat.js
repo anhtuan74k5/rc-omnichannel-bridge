@@ -10,13 +10,13 @@
  * The livechat visitor endpoints accept these headers.
  */
 
-const mapping = require('./mapping');
-const { API, ENV, FILES, HEADERS, MIME_TYPES } = require('./constants/config');
-const { ERRORS } = require('./constants/errors');
-const { dumpRocketChatMessage } = require('./debugDump');
-const { fetchWithTimeout } = require('./httpClient');
-const { log } = require('./logger');
-const { classifyMime } = require('./media/mime');
+const mapping = require('../core/mapping');
+const { API, ENV, FILES, HEADERS, MIME_TYPES } = require('../constants/config');
+const { ERRORS } = require('../constants/errors');
+const { dumpRocketChatMessage } = require('../lib/debugDump');
+const { fetchWithTimeout } = require('../lib/httpClient');
+const { log } = require('../lib/logger');
+const { classifyMime } = require('../media/mime');
 
 const ROCKETCHAT_URL = ENV.rocketchatUrl.replace(/\/+$/, '');
 

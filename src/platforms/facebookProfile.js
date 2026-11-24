@@ -6,9 +6,9 @@
  * to `FB <psid>`.
  */
 
-const { API, ENV } = require('./constants/config');
-const { fetchWithTimeout } = require('./httpClient');
-const { log } = require('./logger');
+const { API, ENV } = require('../constants/config');
+const { fetchWithTimeout } = require('../lib/httpClient');
+const { log } = require('../lib/logger');
 
 async function fetchProfileName(psid) {
   if (!ENV.facebookPageAccessToken) return null;

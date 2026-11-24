@@ -14,7 +14,7 @@ const { PDFParse } = require('pdf-parse');
 const { ENV } = require('../constants/config');
 const { ERRORS } = require('../constants/errors');
 
-const DATA_DIR = path.join(__dirname, '..', 'data', 'documents');
+const DATA_DIR = path.join(__dirname, '..', '..', 'data', 'documents');
 const CHUNK_SIZE = ENV.documentChunkSize;
 const CHUNK_OVERLAP = ENV.documentChunkOverlap;
 const DEFAULT_TOP_K = ENV.documentTopK;

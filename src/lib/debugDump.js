@@ -1,9 +1,9 @@
 const fs = require('fs');
 const path = require('path');
 
-const { ENV } = require('./constants/config');
+const { ENV } = require('../constants/config');
 
-const DEBUG_DUMPS_DIR = path.join(__dirname, 'debug-dumps');
+const DEBUG_DUMPS_DIR = path.join(__dirname, '..', '..', 'debug-dumps');
 const ROCKETCHAT_MEDIA_FIELDS = new Set(['file', 'files', 'attachments', 'fileUpload', 't']);
 const dumpedIds = new Set();
 const MAX_DUMPED_IDS = 5000;

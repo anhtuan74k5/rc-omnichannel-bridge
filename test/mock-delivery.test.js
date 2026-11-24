@@ -19,9 +19,9 @@ test.before(async () => {
   process.env.HTTP_TIMEOUT_MS = '300';
   process.env.MAPPING_FILE = path.join(os.tmpdir(), `mock-map-${process.pid}.json`);
   // Required only after the env above is set (config reads it at load time).
-  facebook = require('../facebook');
-  telegram = require('../telegram');
-  classify = require('../deliveryErrors').classifyDeliveryError;
+  facebook = require('../src/platforms/facebook');
+  telegram = require('../src/platforms/telegram');
+  classify = require('../src/core/deliveryErrors').classifyDeliveryError;
 });
 test.after(() => mock.close());
 test.beforeEach(() => mock.clear());
@@ -36,7 +36,7 @@ async function failure(fn) {
 }
 
 test('base URLs are overridable and trailing slash trimmed', () => {
-  const { API } = require('../constants/config');
+  const { API } = require('../src/constants/config');
   assert.match(API.facebook.graphBaseUrl, /^http:\/\/127\.0\.0\.1:\d+$/);
   assert.equal(API.telegram.fileBaseUrl, `${API.telegram.baseUrl}/file`);
 });

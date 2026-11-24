@@ -35,15 +35,15 @@ for (const method of ['log', 'info', 'warn', 'error']) {
   };
 }
 
-const mapping = require('../mapping');
-const rocketchat = require('../rocketchat');
-const facebook = require('../facebook');
-const { app, facebookQueue } = require('../index');
-const { MESSAGES } = require('../constants/messages');
+const mapping = require('../src/core/mapping');
+const rocketchat = require('../src/rocketchat/rocketchat');
+const facebook = require('../src/platforms/facebook');
+const { app, facebookQueue } = require('..');
+const { MESSAGES } = require('../src/constants/messages');
 const {
   downloadFacebookAttachment,
   isFacebookFileTooLarge,
-} = require('../media/facebookFiles');
+} = require('../src/media/facebookFiles');
 
 const SECRET = process.env.FB_APP_SECRET;
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

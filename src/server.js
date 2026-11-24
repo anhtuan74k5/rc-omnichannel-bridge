@@ -3,12 +3,12 @@
  * HTTP server, and drain queued work on shutdown.
  */
 
-const mapping = require('../mapping');
-const rocketchat = require('../rocketchat');
-const facebook = require('../facebook');
-const telegram = require('../telegram');
-const ai = require('../knowledge/ai');
-const { ENV } = require('../constants/config');
+const mapping = require('./core/mapping');
+const rocketchat = require('./rocketchat/rocketchat');
+const facebook = require('./platforms/facebook');
+const telegram = require('./platforms/telegram');
+const ai = require('./knowledge/ai');
+const { ENV } = require('./constants/config');
 const { app } = require('./app');
 const { facebookQueue, rcWebhook } = require('./runtime');
 const { pollAgentMessages } = require('./outbound/pollAgentMessages');

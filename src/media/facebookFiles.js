@@ -1,6 +1,6 @@
 const { ENV } = require('../constants/config');
 const { ERRORS } = require('../constants/errors');
-const { fetchWithTimeout } = require('../httpClient');
+const { fetchWithTimeout } = require('../lib/httpClient');
 
 const FACEBOOK_FILE_TOO_LARGE = 'FACEBOOK_FILE_TOO_LARGE';
 const FACEBOOK_URL_REJECTED = 'FACEBOOK_MEDIA_URL_REJECTED';

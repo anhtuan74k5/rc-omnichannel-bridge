@@ -1,7 +1,7 @@
 const express = require('express');
-const mapping = require('../../mapping');
-const { ENV } = require('../../constants/config');
-const metrics = require('../../metrics');
+const mapping = require('../core/mapping');
+const { ENV } = require('../constants/config');
+const metrics = require('../core/metrics');
 const { rateLimiter, facebookQueue, rcWebhook } = require('../runtime');
 
 const router = express.Router();

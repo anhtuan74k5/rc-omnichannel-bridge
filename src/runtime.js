@@ -3,12 +3,12 @@
  * Rocket.Chat webhook handler used by more than one module.
  */
 
-const mapping = require('../mapping');
-const { ENV } = require('../constants/config');
-const { createKeyedQueue } = require('../keyedQueue');
-const { createRocketChatWebhook } = require('../rcWebhook');
-const { createPollScheduler } = require('../pollScheduler');
-const { createRateLimiter } = require('../rateLimiter');
+const mapping = require('./core/mapping');
+const { ENV } = require('./constants/config');
+const { createKeyedQueue } = require('./core/keyedQueue');
+const { createRocketChatWebhook } = require('./rocketchat/rcWebhook');
+const { createPollScheduler } = require('./rocketchat/pollScheduler');
+const { createRateLimiter } = require('./core/rateLimiter');
 
 const rateLimiter = createRateLimiter({ limit: ENV.rateLimitPerMinute, windowMs: 60000 });
 setInterval(() => rateLimiter.sweep(), 5 * 60000).unref();

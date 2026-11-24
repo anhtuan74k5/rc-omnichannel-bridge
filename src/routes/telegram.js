@@ -1,7 +1,7 @@
 const express = require('express');
-const telegram = require('../../telegram');
-const { ENV } = require('../../constants/config');
-const { telegramWebhookRejection } = require('../../webhookGuards');
+const telegram = require('../platforms/telegram');
+const { ENV } = require('../constants/config');
+const { telegramWebhookRejection } = require('../platforms/webhookGuards');
 const { forwardToRocketChat } = require('../inbound/forwardToRocketChat');
 const { handleTelegramDocument, handleUnsupportedTelegramMessage, handleTelegramMedia } = require('../inbound/telegram');
 

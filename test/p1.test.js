@@ -15,16 +15,16 @@ process.env.ROCKETCHAT_USER_ID = 'test-user';
 process.env.FB_PAGE_ACCESS_TOKEN = 'test-page-token';
 process.env.TELEGRAM_BOT_TOKEN = 'test-bot-token';
 
-const mapping = require('../mapping');
-const rocketchat = require('../rocketchat');
-const facebook = require('../facebook');
-const telegram = require('../telegram');
-const ai = require('../knowledge/ai');
-const { MESSAGES } = require('../constants/messages');
-const { classifyDeliveryError } = require('../deliveryErrors');
-const { rcMarkdownToPlainText, splitByUtf16 } = require('../textFormat');
-const { ENV } = require('../constants/config');
-const { forwardToRocketChat, isAiPaused } = require('../index');
+const mapping = require('../src/core/mapping');
+const rocketchat = require('../src/rocketchat/rocketchat');
+const facebook = require('../src/platforms/facebook');
+const telegram = require('../src/platforms/telegram');
+const ai = require('../src/knowledge/ai');
+const { MESSAGES } = require('../src/constants/messages');
+const { classifyDeliveryError } = require('../src/core/deliveryErrors');
+const { rcMarkdownToPlainText, splitByUtf16 } = require('../src/core/textFormat');
+const { ENV } = require('../src/constants/config');
+const { forwardToRocketChat, isAiPaused } = require('..');
 
 test.after(() => { try { fs.unlinkSync(mappingFile); } catch { /* already gone */ } });
 

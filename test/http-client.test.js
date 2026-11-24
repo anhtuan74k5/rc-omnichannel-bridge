@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { fetchWithTimeout } = require('../httpClient');
-const { mask } = require('../logger');
+const { fetchWithTimeout } = require('../src/lib/httpClient');
+const { mask } = require('../src/lib/logger');
 
 test('mask hides URL and credential secrets', () => {
   const value = mask('https://api.telegram.org/bot123:secret/sendMessage?token=visitor_abc&access_token=fb-secret');

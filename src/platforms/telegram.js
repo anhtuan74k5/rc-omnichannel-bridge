@@ -9,13 +9,13 @@
 
 require('dotenv').config();
 
-const { rememberTelegramName } = require('./customerNames');
-const { API, DOCUMENT_EXTENSIONS, ENV, FILES, HEADERS, MIME_TYPES, TELEGRAM_MESSAGE_TYPES } = require('./constants/config');
-const { ERRORS } = require('./constants/errors');
-const { dumpTelegramUpdate } = require('./debugDump');
-const { fetchWithTimeout } = require('./httpClient');
-const { log } = require('./logger');
-const { buildTelegramMessages, telegramToRcText } = require('./textFormat');
+const { rememberTelegramName } = require('../core/customerNames');
+const { API, DOCUMENT_EXTENSIONS, ENV, FILES, HEADERS, MIME_TYPES, TELEGRAM_MESSAGE_TYPES } = require('../constants/config');
+const { ERRORS } = require('../constants/errors');
+const { dumpTelegramUpdate } = require('../lib/debugDump');
+const { fetchWithTimeout } = require('../lib/httpClient');
+const { log } = require('../lib/logger');
+const { buildTelegramMessages, telegramToRcText } = require('../core/textFormat');
 let lastUpdateId = 0;
 const processedUpdateIds = new Set();
 const updateRetryCounts = new Map();

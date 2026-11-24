@@ -24,7 +24,7 @@ const fs = require('fs');
 const path = require('path');
 
 // MAPPING_FILE lets tests (or a second deployment) use a different store.
-const MAPPING_FILE = process.env.MAPPING_FILE || path.join(__dirname, 'mapping.json');
+const MAPPING_FILE = process.env.MAPPING_FILE || path.join(__dirname, '..', '..', 'mapping.json');
 const MAX_INBOUND_IDS = 100;
 
 let store = { entries: [] };

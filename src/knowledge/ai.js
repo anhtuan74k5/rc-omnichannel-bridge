@@ -17,8 +17,8 @@
 
 const documents = require('./documents');
 const liveLookup = require('./liveLookup');
-const { fetchWithTimeout } = require('../httpClient');
-const { log } = require('../logger');
+const { fetchWithTimeout } = require('../lib/httpClient');
+const { log } = require('../lib/logger');
 const { ENV } = require('../constants/config');
 const { ERRORS } = require('../constants/errors');
 const { MESSAGES } = require('../constants/messages');

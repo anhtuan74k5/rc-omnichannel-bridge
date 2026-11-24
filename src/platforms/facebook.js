@@ -11,11 +11,11 @@
 
 const crypto = require('crypto');
 
-const { API, ENV, FILES, HEADERS, MIME_TYPES } = require('./constants/config');
-const { ERRORS } = require('./constants/errors');
-const { fetchWithTimeout } = require('./httpClient');
-const { log } = require('./logger');
-const { rcMarkdownToPlainText, splitByUtf16 } = require('./textFormat');
+const { API, ENV, FILES, HEADERS, MIME_TYPES } = require('../constants/config');
+const { ERRORS } = require('../constants/errors');
+const { fetchWithTimeout } = require('../lib/httpClient');
+const { log } = require('../lib/logger');
+const { rcMarkdownToPlainText, splitByUtf16 } = require('../core/textFormat');
 
 // Messenger rejects text longer than 2000 characters.
 const MESSENGER_TEXT_LIMIT = 2000;

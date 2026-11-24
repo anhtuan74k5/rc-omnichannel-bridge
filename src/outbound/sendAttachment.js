@@ -1,7 +1,7 @@
-const facebook = require('../../facebook');
-const telegram = require('../../telegram');
-const { ENV } = require('../../constants/config');
-const { MESSAGES } = require('../../constants/messages');
+const facebook = require('../platforms/facebook');
+const telegram = require('../platforms/telegram');
+const { ENV } = require('../constants/config');
+const { MESSAGES } = require('../constants/messages');
 
 /**
  * Send one Rocket.Chat attachment to the customer's platform. Telegram carries

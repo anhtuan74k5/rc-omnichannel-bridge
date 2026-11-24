@@ -8,7 +8,7 @@
  */
 
 const mapping = require('./mapping');
-const { fetchProfileName } = require('./facebookProfile');
+const { fetchProfileName } = require('../platforms/facebookProfile');
 
 const telegramNames = new Map();
 const MAX_TELEGRAM_NAMES = 1000;

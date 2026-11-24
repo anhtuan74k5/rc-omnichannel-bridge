@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { classifyMime } = require('../media/mime');
+const { classifyMime } = require('../src/media/mime');
 
 test('classifyMime classifies supported media and fallbacks', () => {
   const cases = [
@@ -44,7 +44,7 @@ test('sendMedia uses the endpoint and multipart field for every kind', async (t)
     return response();
   };
   process.env.TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || 'test-token';
-  const telegram = require('../telegram');
+  const telegram = require('../src/platforms/telegram');
   const expected = {
     image: ['sendPhoto', 'photo'],
     document: ['sendDocument', 'document'],
@@ -72,7 +72,7 @@ test('sendPhoto falls back to sendDocument on Telegram 400', async (t) => {
     urls.push(url);
     return urls.length === 1 ? response(false, 400, { ok: false }) : response();
   };
-  const telegram = require('../telegram');
+  const telegram = require('../src/platforms/telegram');
   await telegram.sendPhoto('chat', descriptor('image'), 'caption');
   assert.equal(urls[0].endsWith('/sendPhoto'), true);
   assert.equal(urls[1].endsWith('/sendDocument'), true);
@@ -86,7 +86,7 @@ test('sendMedia sends caption remainder after the first 1024 characters', async 
     bodies.push({ url, body: options.body });
     return url.endsWith('/sendMessage') ? response() : response();
   };
-  const telegram = require('../telegram');
+  const telegram = require('../src/platforms/telegram');
   const caption = 'a'.repeat(1024) + 'tail';
   await telegram.sendMedia('chat', descriptor('document'), caption);
   const mediaEntries = [...bodies[0].body.entries()];

@@ -1,7 +1,7 @@
 const { ENV, HEADERS, MIME_TYPES } = require('../constants/config');
 const { ERRORS } = require('../constants/errors');
-const { fetchWithTimeout } = require('../httpClient');
-const { loginAgent } = require('../rocketchat');
+const { fetchWithTimeout } = require('../lib/httpClient');
+const { loginAgent } = require('../rocketchat/rocketchat');
 
 const ROCKETCHAT_URL = ENV.rocketchatUrl.replace(/\/+$/, '');
 

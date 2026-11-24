@@ -19,9 +19,9 @@ process.env.FB_PAGE_ACCESS_TOKEN = 'auto-load-token';
 process.env.FB_GRAPH_BASE_URL = 'http://127.0.0.1:9'; // profile lookups fail fast, never reach Meta
 process.env.ROCKETCHAT_URL = 'http://rocketchat.invalid';
 
-const mapping = require('../mapping');
-const rocketchat = require('../rocketchat');
-const { app, facebookQueue } = require('../index');
+const mapping = require('../src/core/mapping');
+const rocketchat = require('../src/rocketchat/rocketchat');
+const { app, facebookQueue } = require('..');
 
 const RC_LATENCY_MS = 20;
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

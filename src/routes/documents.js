@@ -1,5 +1,5 @@
 const express = require('express');
-const documents = require('../../knowledge/documents');
+const documents = require('../knowledge/documents');
 const { authorizeAdmin } = require('../auth');
 
 const router = express.Router();

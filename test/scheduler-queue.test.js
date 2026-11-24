@@ -1,8 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { callsPerTick, createPollScheduler } = require('../pollScheduler');
-const { createKeyedQueue } = require('../keyedQueue');
+const { callsPerTick, createPollScheduler } = require('../src/rocketchat/pollScheduler');
+const { createKeyedQueue } = require('../src/core/keyedQueue');
 
 function entry(id, extra = {}) {
   return { platform: 'telegram', platformUserId: id, ...extra };

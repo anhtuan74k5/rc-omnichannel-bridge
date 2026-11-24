@@ -2,11 +2,11 @@
  * Polling loop: forward agent messages to the correct platform.
  */
 
-const mapping = require('../../mapping');
-const rocketchat = require('../../rocketchat');
-const { ENV } = require('../../constants/config');
-const { callsPerTick } = require('../../pollScheduler');
-const metrics = require('../../metrics');
+const mapping = require('../core/mapping');
+const rocketchat = require('../rocketchat/rocketchat');
+const { ENV } = require('../constants/config');
+const { callsPerTick } = require('../rocketchat/pollScheduler');
+const metrics = require('../core/metrics');
 const { pollScheduler, rcWebhook } = require('../runtime');
 const { deliverAgentMessages } = require('./deliverAgentMessages');
 

@@ -3,7 +3,7 @@
  */
 
 const express = require('express');
-const { ENV } = require('../constants/config');
+const { ENV } = require('./constants/config');
 
 const app = express();
 // Keep the raw bytes: Facebook's X-Hub-Signature-256 is computed over them.

@@ -162,7 +162,7 @@ Nếu chưa đặt `ADMIN_API_KEY`, hai endpoint tài liệu bị vô hiệu hó
 | `AI_BASE_URL` | `https://api.openai.com/v1` | URL API AI |
 | `AI_MODEL` | `gpt-4o-mini` | Tên model |
 | `AI_BUSINESS_CONTEXT` | Rỗng | Thông tin doanh nghiệp được phép dùng |
-| `AI_HANDOFF_MESSAGE` | Theo `constants/messages.js` | Tin nhắn chuyển cho agent |
+| `AI_HANDOFF_MESSAGE` | Theo `src/constants/messages.js` | Tin nhắn chuyển cho agent |
 | `REQUEST_BODY_LIMIT` | `2mb` | Giới hạn body cho `/documents/upload` (chỉ route này) |
 | `WEBHOOK_BODY_LIMIT` | `1mb` | Giới hạn body cho mọi route còn lại, kể cả `/webhook/*`; vượt thì `413` |
 | `RATE_LIMIT_PER_MINUTE` | `20` | Số tin tối đa mỗi khách (`platform:userId`) mỗi phút. Vượt: bridge báo khách một lần, bỏ qua tin, không gọi AI. `0` = tắt |
@@ -524,18 +524,32 @@ src/
     deliverAgentMessages.js  Gửi (retry, dedupe), dùng cho polling và webhook
     pollAgentMessages.js     Vòng polling Rocket.Chat dự phòng
     sendReply.js / sendAttachment.js / deliveryNotices.js
-knowledge/               ai.js, documents.js, liveLookup.js, prompt.md
-telegram.js              Telegram webhook, polling và gửi media
-facebook.js              Facebook webhook và gửi text
-rocketchat.js            Rocket.Chat Livechat API
-rcWebhook.js             Nhận webhook Omnichannel, nhịp polling dự phòng
-textFormat.js            Chuẩn hóa text, shortcode và tách grapheme
-mapping.js               Lưu mapping visitor và room
-media/                   Tải, phân loại và chuyển media
-constants/               Cấu hình, message và error
+  platforms/             Kết nối nền tảng ngoài
+    telegram.js             Telegram webhook, polling và gửi media
+    facebook.js             Facebook webhook, gửi text/media
+    facebookProfile.js      Lấy tên khách từ Graph API
+    webhookGuards.js        Chặn webhook Telegram khi đang polling
+  rocketchat/            Kết nối Rocket.Chat
+    rocketchat.js           Rocket.Chat Livechat API
+    rcWebhook.js            Nhận webhook Omnichannel, nhịp polling dự phòng
+    pollScheduler.js        Lập lịch polling công bằng giữa các phòng
+  core/                  Logic dùng chung
+    mapping.js              Lưu mapping visitor và room (mapping.json ở gốc dự án)
+    keyedQueue.js           Hàng đợi theo từng khách
+    rateLimiter.js          Giới hạn tốc độ theo khách
+    deliveryErrors.js       Phân loại lỗi gửi (tạm thời, vĩnh viễn, xác thực)
+    customerNames.js, metrics.js, textFormat.js
+  lib/                   httpClient.js, logger.js, debugDump.js
+  media/                 Tải, phân loại và chuyển media
+  constants/             Cấu hình, message và error
+  knowledge/             ai.js, documents.js, liveLookup.js, prompt.md
 test/                    Bộ test node:test
-scripts/smoke.md         Checklist kiểm thử thủ công
+scripts/                 fb-check.js, restart-bridge.ps1, e2e/ (mock Graph/Telegram)
+docs/                    Kết quả kiểm thử, baseline lint
 ```
+
+Ở gốc dự án chỉ còn `index.js`, cấu hình (`package.json`, `.env`, `eslint.config.js`),
+tài liệu và dữ liệu chạy (`mapping.json`, `data/`).
 
 ## Vận hành: tên khách, chỉ số và giới hạn
 

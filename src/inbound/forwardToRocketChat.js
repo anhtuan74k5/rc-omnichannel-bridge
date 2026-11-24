@@ -2,12 +2,12 @@
  * Platform message -> Rocket.Chat (with the AI auto-reply in front).
  */
 
-const mapping = require('../../mapping');
-const rocketchat = require('../../rocketchat');
-const ai = require('../../knowledge/ai');
-const { ENV } = require('../../constants/config');
-const { MESSAGES } = require('../../constants/messages');
-const metrics = require('../../metrics');
+const mapping = require('../core/mapping');
+const rocketchat = require('../rocketchat/rocketchat');
+const ai = require('../knowledge/ai');
+const { ENV } = require('../constants/config');
+const { MESSAGES } = require('../constants/messages');
+const metrics = require('../core/metrics');
 const { rateLimiter } = require('../runtime');
 const { ensureRocketChatRoom } = require('./rocketchatRoom');
 const { sendReplyToPlatform } = require('../outbound/sendReply');

@@ -4,7 +4,7 @@
  * Used by the Telegram and Facebook inbound handlers.
  */
 
-const rocketchat = require('../../rocketchat');
+const rocketchat = require('../rocketchat/rocketchat');
 const { ensureRocketChatRoom } = require('./rocketchatRoom');
 
 /**

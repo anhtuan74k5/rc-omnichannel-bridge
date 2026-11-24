@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 
 process.env.TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || 'test-token';
 
-const telegram = require('../telegram');
+const telegram = require('../src/platforms/telegram');
 
 function jsonResponse(status, body) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });

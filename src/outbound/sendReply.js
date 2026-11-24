@@ -1,5 +1,5 @@
-const facebook = require('../../facebook');
-const telegram = require('../../telegram');
+const facebook = require('../platforms/facebook');
+const telegram = require('../platforms/telegram');
 
 /**
  * Send a reply back to the correct platform (Facebook or Telegram).

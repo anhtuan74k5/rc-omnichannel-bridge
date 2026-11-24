@@ -10,10 +10,10 @@ process.env.MAPPING_FILE = mappingFile;
 process.env.AI_ENABLED = 'false';
 process.env.ROCKETCHAT_WEBHOOK_SECRET = 'rc-hook-secret';
 
-const mapping = require('../mapping');
-const telegram = require('../telegram');
-const { app, deliverAgentMessages, rcWebhook } = require('../index');
-const { createRocketChatWebhook, parseEvent } = require('../rcWebhook');
+const mapping = require('../src/core/mapping');
+const telegram = require('../src/platforms/telegram');
+const { app, deliverAgentMessages, rcWebhook } = require('..');
+const { createRocketChatWebhook, parseEvent } = require('../src/rocketchat/rcWebhook');
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const HEADER = 'X-RocketChat-Livechat-Token';

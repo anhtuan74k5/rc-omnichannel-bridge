@@ -10,9 +10,9 @@ process.env.FB_APP_SECRET = 'test-app-secret';
 process.env.FB_PAGE_ACCESS_TOKEN = 'test-page-token';
 process.env.FB_VERIFY_TOKEN = 'test-verify';
 
-const facebook = require('../facebook');
-const { app } = require('../index');
-const { downloadFacebookAttachment, isAllowedFacebookMediaUrl } = require('../media/facebookFiles');
+const facebook = require('../src/platforms/facebook');
+const { app } = require('..');
+const { downloadFacebookAttachment, isAllowedFacebookMediaUrl } = require('../src/media/facebookFiles');
 
 function sign(body, secret = 'test-app-secret') {
   return `sha256=${crypto.createHmac('sha256', secret).update(body).digest('hex')}`;

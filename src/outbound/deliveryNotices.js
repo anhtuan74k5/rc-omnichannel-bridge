@@ -1,6 +1,6 @@
-const rocketchat = require('../../rocketchat');
-const { MESSAGES } = require('../../constants/messages');
-const metrics = require('../../metrics');
+const rocketchat = require('../rocketchat/rocketchat');
+const { MESSAGES } = require('../constants/messages');
+const metrics = require('../core/metrics');
 
 /** Loud, repeatable signal that a platform token was refused: log line plus /health. */
 function alertCredentialsRejected(platform, reason) {

@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { rcToTelegramText, telegramToRcText } = require('../textFormat');
+const { rcToTelegramText, telegramToRcText } = require('../src/core/textFormat');
 
 test('converts known shortcodes and preserves unknown shortcodes', () => {
   assert.deepEqual(rcToTelegramText(':smile: :thumbsup: :not-real:'), ['😄 👍 :not-real:']);
@@ -34,7 +34,7 @@ const {
   buildTelegramMessages,
   isWellFormedTelegramHtml,
   rcMarkdownToTelegramHtml,
-} = require('../textFormat');
+} = require('../src/core/textFormat');
 
 function render(text) {
   return buildTelegramMessages(text, { markdown: true }).map(({ text: out, parseMode }) => [parseMode, out]);
@@ -131,7 +131,7 @@ test('rcMarkdownToTelegramHtml drops stash markers present in user input', () =>
 
 // ---- Rocket.Chat timestamps -------------------------------------------------
 
-const { rcTimestampsToPlainText } = require('../textFormat');
+const { rcTimestampsToPlainText } = require('../src/core/textFormat');
 
 const TS = '2026-11-10T13:07:38.825+00:00'; // 20:07 in Asia/Bangkok
 const UNIX = Math.floor(new Date(TS).getTime() / 1000);

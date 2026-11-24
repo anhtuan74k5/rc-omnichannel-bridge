@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { extractAttachments } = require('../rocketchat');
+const { extractAttachments } = require('../src/rocketchat/rocketchat');
 
 test('extractAttachments prefers Rocket.Chat attachment title_link over publicFilePath', () => {
   const [attachment] = extractAttachments({

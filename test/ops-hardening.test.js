@@ -16,14 +16,14 @@ process.env.TELEGRAM_POLLING = 'true';
 process.env.TELEGRAM_WEBHOOK_SECRET = '';
 process.env.FB_APP_SECRET = '';
 
-const mapping = require('../mapping');
-const rocketchat = require('../rocketchat');
-const telegram = require('../telegram');
-const { app, forwardToRocketChat } = require('../index');
-const { createRateLimiter } = require('../rateLimiter');
-const { createTimer } = require('../metrics');
-const { resolveCustomerName, rememberTelegramName, telegramDisplayName } = require('../customerNames');
-const { telegramWebhookRejection } = require('../webhookGuards');
+const mapping = require('../src/core/mapping');
+const rocketchat = require('../src/rocketchat/rocketchat');
+const telegram = require('../src/platforms/telegram');
+const { app, forwardToRocketChat } = require('..');
+const { createRateLimiter } = require('../src/core/rateLimiter');
+const { createTimer } = require('../src/core/metrics');
+const { resolveCustomerName, rememberTelegramName, telegramDisplayName } = require('../src/core/customerNames');
+const { telegramWebhookRejection } = require('../src/platforms/webhookGuards');
 
 test.after(() => { try { fs.unlinkSync(mappingFile); } catch { /* gone */ } });
 
@@ -69,7 +69,7 @@ test('G9: Facebook uses the profile lookup once, falls back on failure', async (
 
 test('G10: AI and platform modules never log customer message text', () => {
   const root = path.join(__dirname, '..');
-  const ai = fs.readFileSync(path.join(root, 'knowledge', 'ai.js'), 'utf8');
+  const ai = fs.readFileSync(path.join(root, 'src', 'knowledge', 'ai.js'), 'utf8');
   assert.doesNotMatch(ai, /Asking AI to handle:/);
   for (const line of ai.split('\n').filter((l) => /(console|log)\.(log|info|warn|error)/.test(l))) {
     assert.doesNotMatch(line, /customerMessage(?!\)\.length)/, line);

@@ -2,12 +2,12 @@
  * Incoming Telegram documents and media -> Rocket.Chat.
  */
 
-const rocketchat = require('../../rocketchat');
-const telegram = require('../../telegram');
-const documents = require('../../knowledge/documents');
-const { CHANNELS, ENV } = require('../../constants/config');
-const { MESSAGES } = require('../../constants/messages');
-const { downloadTelegramFile, isTelegramFileTooLarge } = require('../../media/telegramFiles');
+const rocketchat = require('../rocketchat/rocketchat');
+const telegram = require('../platforms/telegram');
+const documents = require('../knowledge/documents');
+const { CHANNELS, ENV } = require('../constants/config');
+const { MESSAGES } = require('../constants/messages');
+const { downloadTelegramFile, isTelegramFileTooLarge } = require('../media/telegramFiles');
 const { ensureRocketChatRoom } = require('./rocketchatRoom');
 const { forwardToRocketChat } = require('./forwardToRocketChat');
 const { relayMediaToRocketChat } = require('./mediaPipeline');

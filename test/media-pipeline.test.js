@@ -9,7 +9,7 @@ const mappingFile = path.join(os.tmpdir(), `media-pipeline-mapping-${process.pid
 process.env.MAPPING_FILE = mappingFile;
 process.env.AI_ENABLED = 'false';
 
-const rocketchat = require('../rocketchat');
+const rocketchat = require('../src/rocketchat/rocketchat');
 const { relayMediaToRocketChat } = require('../src/inbound/mediaPipeline');
 
 test.after(() => { try { fs.unlinkSync(mappingFile); } catch { /* already gone */ } });

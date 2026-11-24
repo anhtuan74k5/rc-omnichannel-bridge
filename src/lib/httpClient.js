@@ -1,5 +1,5 @@
-const { ENV } = require('./constants/config');
-const metrics = require('./metrics');
+const { ENV } = require('../constants/config');
+const metrics = require('../core/metrics');
 
 const RETRYABLE_STATUS = (status) => status === 429 || status >= 500;
 

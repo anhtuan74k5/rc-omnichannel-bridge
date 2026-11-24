@@ -82,12 +82,12 @@ test.before(async () => {
   const originalLog = console.log;
   console.log = (...args) => { if (process.env.AUTO_TEST_VERBOSE) originalLog(...args); };
 
-  mapping = require('../mapping');
-  rocketchat = require('../rocketchat');
-  facebook = require('../facebook');
-  telegram = require('../telegram');
-  ({ MESSAGES } = require('../constants/messages'));
-  indexModule = require('../index');
+  mapping = require('../src/core/mapping');
+  rocketchat = require('../src/rocketchat/rocketchat');
+  facebook = require('../src/platforms/facebook');
+  telegram = require('../src/platforms/telegram');
+  ({ MESSAGES } = require('../src/constants/messages'));
+  indexModule = require('..');
   mapping.load();
 
   rocketchat.getOrCreateVisitor = async (id) => `visitor_${id}`;
@@ -328,8 +328,8 @@ test('T-S06: a customer spamming 100 messages gets 20 through, one notice, and t
 
 function loadInChild(file) {
   const script = `
-    const mapping = require(${JSON.stringify(path.resolve(__dirname, '../mapping.js'))});
-    mapping.load();
+    const mapping = require(${JSON.stringify(path.resolve(__dirname, '../src/core/mapping.js'))});
+mapping.load();
     const entry = mapping.getOrCreate('facebook', 'after-restart');
     console.log(JSON.stringify({ ok: true, found: Boolean(mapping.findByPlatformUser('facebook', 'after-restart')) }));
   `;
@@ -366,8 +366,8 @@ test('T-H06: a failed write leaves the previous mapping.json intact and no temp 
   const file = tmp('h06-write.json');
   const script = `
     const fs = require('fs');
-    const mapping = require(${JSON.stringify(path.resolve(__dirname, '../mapping.js'))});
-    mapping.load();
+    const mapping = require(${JSON.stringify(path.resolve(__dirname, '../src/core/mapping.js'))});
+mapping.load();
     mapping.getOrCreate('telegram', 'kept');
     const rename = fs.renameSync;
     fs.renameSync = () => { throw new Error('disk full (simulated)'); };

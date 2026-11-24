@@ -2,14 +2,14 @@
  * Agent -> customer delivery (shared by polling and the Rocket.Chat webhook).
  */
 
-const mapping = require('../../mapping');
-const rocketchat = require('../../rocketchat');
-const facebook = require('../../facebook');
-const telegram = require('../../telegram');
-const { ENV } = require('../../constants/config');
-const { dumpRocketChatMessage } = require('../../debugDump');
-const { downloadRocketChatFile, isPermanentDownloadError } = require('../../media/rocketchatFiles');
-const { classifyDeliveryError } = require('../../deliveryErrors');
+const mapping = require('../core/mapping');
+const rocketchat = require('../rocketchat/rocketchat');
+const facebook = require('../platforms/facebook');
+const telegram = require('../platforms/telegram');
+const { ENV } = require('../constants/config');
+const { dumpRocketChatMessage } = require('../lib/debugDump');
+const { downloadRocketChatFile, isPermanentDownloadError } = require('../media/rocketchatFiles');
+const { classifyDeliveryError } = require('../core/deliveryErrors');
 const { agentDeliveryQueue } = require('../runtime');
 const { sendReplyToPlatform } = require('./sendReply');
 const { sendAttachmentToPlatform, mediaDeliveryFailedMessage } = require('./sendAttachment');

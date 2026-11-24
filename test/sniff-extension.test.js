@@ -1,6 +1,6 @@
 ﻿const test = require('node:test');
 const assert = require('node:assert/strict');
-const { sniffExtension } = require('../media/facebookFiles');
+const { sniffExtension } = require('../src/media/facebookFiles');
 
 const pad = (head) => Buffer.concat([Buffer.from(head, 'latin1'), Buffer.alloc(16)]);
 

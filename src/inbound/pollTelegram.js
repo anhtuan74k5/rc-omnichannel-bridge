@@ -1,5 +1,5 @@
-const telegram = require('../../telegram');
-const metrics = require('../../metrics');
+const telegram = require('../platforms/telegram');
+const metrics = require('../core/metrics');
 const { forwardToRocketChat } = require('./forwardToRocketChat');
 const { handleTelegramDocument, handleUnsupportedTelegramMessage, handleTelegramMedia } = require('./telegram');
 

@@ -1,6 +1,6 @@
-const mapping = require('../../mapping');
-const rocketchat = require('../../rocketchat');
-const { resolveCustomerName } = require('../../customerNames');
+const mapping = require('../core/mapping');
+const rocketchat = require('../rocketchat/rocketchat');
+const { resolveCustomerName } = require('../core/customerNames');
 
 const roomEnsureMutexes = new Map();
 

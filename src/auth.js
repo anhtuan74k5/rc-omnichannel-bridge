@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { ENV } = require('../constants/config');
+const { ENV } = require('./constants/config');
 
 function authorizeAdmin(req) {
   if (!ENV.adminApiKey) {
