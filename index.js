@@ -110,6 +110,12 @@ function isAiPaused(entry) {
   return last > 0 && Date.now() - last < ENV.aiResumeAfterMs;
 }
 
+/** Loud, repeatable signal that a platform token was refused: log line plus /health. */
+function alertCredentialsRejected(platform, reason) {
+  console.error(`[ALERT] ${platform} credentials rejected: ${reason}`);
+  metrics.set(`${platform}AuthRejectedAt`, Date.now());
+}
+
 /** Tell the agent, inside the room, that a message could not reach the customer. */
 async function notifyDeliveryFailure(entry, what, reason) {
   try {
@@ -657,6 +663,10 @@ app.get('/health', (req, res) => {
     lastTelegramPollAt: m.lastTelegramPollAt || null,
     rocketChat429: m.rateLimited429,
     customerRateLimited: rateLimiter.limitedTotal(),
+    credentialsRejectedAt: {
+      facebook: m.facebookAuthRejectedAt || null,
+      telegram: m.telegramAuthRejectedAt || null,
+    },
     facebookTokenConfigured: Boolean(ENV.facebookPageAccessToken),
     rocketChatWebhook: rcWebhook.status(),
     uptimeSeconds: Math.round((Date.now() - m.startedAt) / 1000),
@@ -774,7 +784,7 @@ function deliverAgentMessages(entry, messages, closed = Boolean(messages.closed)
           } catch (err) {
             console.error(`[poll] Failed to forward attachment ${attachment.filename} to ${entry.platform}:`, err.message);
             const failure = classifyDeliveryError(entry.platform, err);
-            if (failure.kind === 'auth') console.error(`[ALERT] ${entry.platform} credentials rejected: ${failure.reason}`);
+            if (failure.kind === 'auth') alertCredentialsRejected(entry.platform, failure.reason);
             const downloadFailed = isPermanentDownloadError(err);
             const permanent = downloadFailed || failure.kind === 'permanent';
             const retries = (messageRetryCounts.get(attachmentRetryKey) || 0) + 1;
@@ -831,7 +841,7 @@ function deliverAgentMessages(entry, messages, closed = Boolean(messages.closed)
       } catch (err) {
         console.error(`[poll] Failed to forward message ${msg._id} to ${entry.platform}:`, err.message);
         const failure = classifyDeliveryError(entry.platform, err);
-        if (failure.kind === 'auth') console.error(`[ALERT] ${entry.platform} credentials rejected: ${failure.reason}`);
+        if (failure.kind === 'auth') alertCredentialsRejected(entry.platform, failure.reason);
         const retries = (messageRetryCounts.get(retryKey) || 0) + 1;
         messageRetryCounts.set(retryKey, retries);
         // Retrying cannot fix a blocked customer or a closed 24 h window.
@@ -996,5 +1006,13 @@ function authorizeAdmin(req) {
   }
   return null;
 }
+
+// Malformed or oversized request bodies: a short JSON answer, never a stack trace.
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  const status = Number(err && err.status) >= 400 && Number(err.status) < 500 ? Number(err.status) : 500;
+  console.warn(`[http] Rejected request with status ${status} (${(err && err.type) || 'error'}).`);
+  return res.status(status).json({ success: false, error: status === 413 ? 'Payload too large' : 'Bad request' });
+});
 
 module.exports = { app, authorizeAdmin, deliverAgentMessages, rcWebhook, facebookQueue, forwardToRocketChat, isAiPaused, start };

@@ -46,6 +46,14 @@ function load() {
     }
   } catch (err) {
     console.error('[mapping] Failed to load mapping file, starting fresh:', err.message);
+    // Keep the unreadable file: the next save would otherwise overwrite it for good.
+    try {
+      const backup = `${MAPPING_FILE}.corrupt-${Date.now()}`;
+      fs.renameSync(MAPPING_FILE, backup);
+      console.error(`[mapping] ALERT: the unreadable mapping file was kept as ${path.basename(backup)}; restore it by hand if needed.`);
+    } catch (backupErr) {
+      console.error('[mapping] Could not keep a copy of the unreadable mapping file:', backupErr.message);
+    }
     store = { entries: [] };
   }
 }

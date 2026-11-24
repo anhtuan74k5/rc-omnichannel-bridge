@@ -41,7 +41,8 @@ const ERRORS = {
     unsupportedDocument: (extension) => `Unsupported document type "${extension || 'unknown'}".`,
   },
   ai: {
-    api: (status, data) => `AI API error ${status}: ${JSON.stringify(data)}`,
+    // Only the provider's short message, with API keys masked: the full body may echo secrets.
+    api: (status, data) => `AI API error ${status}: ${String((data && data.error && data.error.message) || '').replace(/sk-[A-Za-z0-9_-]+/g, 'sk-***').slice(0, 200)}`,
   },
 };
 
