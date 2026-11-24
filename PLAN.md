@@ -198,9 +198,9 @@ sách: bỏ qua, hoặc gửi "✏️ (đã sửa) …". Cần quyết định.
 | G11 | Không có đo độ trễ/chỉ số vận hành | Thêm log thời gian từng chặng (nhận → RC → gửi), mở rộng `/health` (số phòng, độ sâu hàng đợi, lần poll cuối, số 429, trạng thái token Facebook) |
 | G12 | `REQUEST_BODY_LIMIT=100mb` áp cho **mọi** route, kể cả webhook công khai | Giới hạn nhỏ cho `/webhook/*` (ví dụ 1 MB), lớn chỉ cho `/documents/upload` |
 | G13 | Không giới hạn tốc độ theo khách: một người spam gây tốn tiền AI và đầy phòng | Rate limit theo `platform:userId` (ví dụ 20 tin/phút), vượt thì báo một lần và bỏ qua |
-| G14 | Không thể giả lập lỗi Graph/Telegram: URL cứng trong `constants/config.js` | Cho phép ghi đè `TELEGRAM_API_BASE_URL`, `FB_GRAPH_BASE_URL` để chạy mock server (điều kiện tiên quyết cho kiểm thử lỗi) |
-| G15 | Không có kiểm tra sức khỏe token lúc khởi động | Gọi `debug_token`/`/me` khi start, cảnh báo nếu lỗi hoặc sắp hết hạn |
-| G16 | Facebook voice clip/Telegram voice định dạng khác nhau | Cần kiểm tra Live: Messenger audio có nhận `.ogg` (opus) không; nếu không, chuyển `audio/mp4`/mp3 hoặc gửi dạng file |
+| G14 | ✅ Đã làm (W0). Không thể giả lập lỗi Graph/Telegram: URL cứng trong `constants/config.js` | Cho phép ghi đè `TELEGRAM_API_BASE_URL`, `FB_GRAPH_BASE_URL` để chạy mock server (điều kiện tiên quyết cho kiểm thử lỗi) |
+| G15 | ✅ Đã làm (khởi động: `checkToken()` ở `facebook.js`/`telegram.js`; tin hệ thống vào phòng vẫn thuộc W6). Không có kiểm tra sức khỏe token lúc khởi động | Gọi `debug_token`/`/me` khi start, cảnh báo nếu lỗi hoặc sắp hết hạn |
+| G16 | ⏳ Chỉ kiểm chứng được ở Live (mock không biết Messenger chấp nhận codec nào; chưa viết code). Facebook voice clip/Telegram voice định dạng khác nhau | Cần kiểm tra Live: Messenger audio có nhận `.ogg` (opus) không; nếu không, chuyển `audio/mp4`/mp3 hoặc gửi dạng file |
 | G17 | ngrok free: có trang cảnh báo, giới hạn băng thông, tiến trình phải tự giữ sống | Chấp nhận khi dev; để production dùng VPS (xem README) |
 | G18 | Webhook Telegram vẫn nhận request khi đang chạy polling | Không hại, nhưng nên tắt route hoặc yêu cầu secret khi `TELEGRAM_POLLING=true` |
 

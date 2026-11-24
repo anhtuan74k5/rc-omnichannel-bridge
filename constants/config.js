@@ -33,13 +33,19 @@ const DEFAULTS = Object.freeze({
   telegramWebhookPath: '/webhook/telegram',
 });
 
+// Base URLs can be overridden (e.g. to point at scripts/e2e/mock-platforms.js).
+const trimUrl = (value, fallback) => String(value || fallback).trim().replace(/\/+$/, '');
+const TELEGRAM_BASE_URL = trimUrl(process.env.TELEGRAM_API_BASE_URL, 'https://api.telegram.org');
+const FB_GRAPH_BASE_URL = trimUrl(process.env.FB_GRAPH_BASE_URL, 'https://graph.facebook.com');
+
 const API = Object.freeze({
   telegram: {
-    baseUrl: 'https://api.telegram.org',
-    fileBaseUrl: 'https://api.telegram.org/file',
+    baseUrl: TELEGRAM_BASE_URL,
+    fileBaseUrl: `${TELEGRAM_BASE_URL}/file`,
     allowedUpdates: ['message', 'edited_message'],
   },
   facebook: {
+    graphBaseUrl: FB_GRAPH_BASE_URL,
     graphVersion: 'v25.0',
   },
   rocketChat: {

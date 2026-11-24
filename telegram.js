@@ -372,7 +372,31 @@ async function setWebhook(webhookUrl = ENV.telegramWebhookUrl) {
   return data;
 }
 
+/** Startup health check via getMe. Never throws and never logs the token. */
+async function checkToken() {
+  if (!ENV.telegramBotToken) {
+    log.info('[telegram] Token check skipped: TELEGRAM_BOT_TOKEN not set.');
+    return { ok: false, status: 'missing' };
+  }
+  try {
+    const res = await fetchWithTimeout(`${API.telegram.baseUrl}/bot${ENV.telegramBotToken}/getMe`, {}, { retries: 0, timeoutMs: 8000 });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      log.warn('[telegram] Token check FAILED; the bot token is invalid or revoked.', {
+        status: res.status, description: data && data.description,
+      });
+      return { ok: false, status: res.status === 401 ? 'invalid' : 'error' };
+    }
+    log.info('[telegram] Token OK', { bot: data.result && data.result.username });
+    return { ok: true, status: 'ok', username: data.result && data.result.username };
+  } catch (error) {
+    log.warn('[telegram] Token check could not reach Telegram.', { error: error.message });
+    return { ok: false, status: 'unreachable' };
+  }
+}
+
 module.exports = {
+  checkToken,
   downloadDocument,
   handleWebhook,
   pollUpdates,

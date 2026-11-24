@@ -871,6 +871,9 @@ async function start() {
     }
     console.log(`[startup] Facebook webhook:  http://localhost:${PORT}/webhook/facebook`);
     console.log(`[startup] Telegram webhook:  http://localhost:${PORT}/webhook/telegram`);
+    // Informational only: failures are logged, never fatal.
+    facebook.checkToken().catch(() => {});
+    telegram.checkToken().catch(() => {});
   });
 
   // Let queued Facebook work finish before exiting so acknowledged messages
