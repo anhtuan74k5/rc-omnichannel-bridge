@@ -9,6 +9,7 @@
 
 require('dotenv').config();
 
+const { rememberTelegramName } = require('./customerNames');
 const { API, DOCUMENT_EXTENSIONS, ENV, FILES, HEADERS, MIME_TYPES, TELEGRAM_MESSAGE_TYPES } = require('./constants/config');
 const { ERRORS } = require('./constants/errors');
 const { dumpTelegramUpdate } = require('./debugDump');
@@ -73,6 +74,7 @@ async function handleWebhook(body, onMessage, onDocument, onUnsupportedMessage, 
     log.warn('[telegram] Ignoring message from chat outside the allowlist.');
     return;
   }
+  rememberTelegramName(chatId, message);
 
   // Editing a photo/file caption must not re-upload or re-announce the media.
   if (edited && !text) {

@@ -1,4 +1,5 @@
 const { ENV } = require('./constants/config');
+const metrics = require('./metrics');
 
 const RETRYABLE_STATUS = (status) => status === 429 || status >= 500;
 
@@ -48,6 +49,7 @@ async function fetchWithTimeout(url, options = {}, policy = {}) {
 
     try {
       const response = await fetch(url, { ...options, signal: controller.signal });
+      if (response.status === 429) metrics.inc('rateLimited429');
       if (attempt >= retries || !canRetryMethod || !(await retryOn(response.status, response))) {
         clearTimeout(timeout);
         return response;

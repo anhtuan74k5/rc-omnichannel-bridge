@@ -225,3 +225,15 @@ Lưu ý:
 - Lộ authtoken ngrok: <https://dashboard.ngrok.com/get-started/your-authtoken> >
   **Reset**, rồi chạy lại `ngrok config add-authtoken`.
 - Không bao giờ dán các giá trị này vào chat, issue, ảnh chụp màn hình hay commit.
+
+## 12. Chỉ số vận hành, tên khách và giới hạn
+
+- `GET /health` (qua ngrok hoặc `localhost:3001`) hiện số phòng, độ sâu hàng đợi
+  Facebook, lần poll cuối, số lần bị 429 và số tin bị giới hạn tốc độ. Nếu
+  `lastAgentPollAt` đứng yên nhiều phút thì vòng poll đang kẹt.
+- Dòng log `[timing] ...` cho biết chặng nào chậm (AI, Rocket.Chat hay gửi lại khách).
+- Visitor mới trong Rocket.Chat mang tên thật của khách nếu lấy được; nếu Page chưa
+  có quyền đọc hồ sơ thì vẫn là `FB <psid>`.
+- Khách gửi quá `RATE_LIMIT_PER_MINUTE` tin/phút sẽ nhận **một** thông báo chậm lại,
+  các tin dư bị bỏ và AI không bị gọi. Khi chạy test thủ công, đừng gửi dồn quá số này.
+- Khi `TELEGRAM_POLLING=true`, `POST /webhook/telegram` trả `404`.

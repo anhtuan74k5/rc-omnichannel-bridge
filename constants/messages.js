@@ -153,6 +153,7 @@ or
       `${title}: ${incumbent}${incumbentSince ? `, in office since ${incumbentSince}` : ''}. Source: Wikipedia (${source}).`,
   },
   routing: {
+    rateLimited: "You are sending messages too quickly. Please slow down; some messages were skipped.",
     failed: "I received your message, but the support system is currently unavailable. Please try again in a few minutes.",
   },
 };

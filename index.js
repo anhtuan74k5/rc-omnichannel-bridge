@@ -32,6 +32,10 @@ const { downloadFacebookAttachment, isFacebookFileTooLarge } = require('./media/
 const { classifyDeliveryError } = require('./deliveryErrors');
 const { createKeyedQueue } = require('./keyedQueue');
 const { callsPerTick, createPollScheduler } = require('./pollScheduler');
+const { createRateLimiter } = require('./rateLimiter');
+const { resolveCustomerName } = require('./customerNames');
+const { telegramWebhookRejection } = require('./webhookGuards');
+const metrics = require('./metrics');
 
 
 const PORT = ENV.port;
@@ -41,11 +45,14 @@ const TELEGRAM_POLL_INTERVAL_MS = ENV.telegramPollIntervalMs;
 const AI_HANDOFF_MESSAGE = ENV.aiHandoffMessage || MESSAGES.ai.handoffDefault;
 
 const app = express();
-app.use(express.json({
-  limit: ENV.requestBodyLimit,
-  // Keep the raw bytes: Facebook's X-Hub-Signature-256 is computed over them.
-  verify: (req, res, buf) => { req.rawBody = buf; },
-}));
+// Keep the raw bytes: Facebook's X-Hub-Signature-256 is computed over them.
+const keepRawBody = (req, res, buf) => { req.rawBody = buf; };
+// Only the admin upload may be large; the first parser to run wins.
+app.use('/documents/upload', express.json({ limit: ENV.requestBodyLimit, verify: keepRawBody }));
+app.use(express.json({ limit: ENV.webhookBodyLimit, verify: keepRawBody }));
+
+const rateLimiter = createRateLimiter({ limit: ENV.rateLimitPerMinute, windowMs: 60000 });
+setInterval(() => rateLimiter.sweep(), 5 * 60000).unref();
 
 let telegramPollingInProgress = false;
 let agentPollingInProgress = false;
@@ -107,7 +114,9 @@ async function ensureRocketChatRoom(platform, platformUserId, name) {
   const previous = roomEnsureMutexes.get(key) || Promise.resolve();
   const task = async () => {
     const entry = mapping.getOrCreate(platform, platformUserId);
-    const visitorToken = await rocketchat.getOrCreateVisitor(platformUserId, name);
+    // The name only matters while the visitor is created; skip lookups afterwards.
+    const visitorName = entry.visitorToken ? name : await resolveCustomerName(platform, platformUserId, name);
+    const visitorToken = await rocketchat.getOrCreateVisitor(platformUserId, visitorName);
     // lastInboundAt marks the room "hot" so the poller serves it more often.
     mapping.update(entry, { visitorToken, lastInboundAt: Date.now() });
 
@@ -389,7 +398,30 @@ function mediaDeliveryFailedMessage(platform) {
  * AI conversation in Omnichannel). If no (or AI disabled), hand off to agent.
  */
 async function forwardToRocketChat(platform, platformUserId, name, text, options = {}) {
+  const timer = metrics.createTimer();
+  try {
+    await forwardToRocketChatInner(platform, platformUserId, name, text, options, timer);
+  } finally {
+    console.log(`[timing] ${platform}:${platformUserId} ${timer.summary()}`);
+  }
+}
+
+async function forwardToRocketChatInner(platform, platformUserId, name, text, options, timer) {
   const known = mapping.findByPlatformUser(platform, platformUserId);
+
+  // Per-customer rate limit: skip the message (and the AI) once a customer floods.
+  const limit = rateLimiter.check(`${platform}:${platformUserId}`);
+  if (!limit.allowed) {
+    console.warn(`[ratelimit] Dropping message from ${platform}:${platformUserId}.`);
+    if (limit.notify) {
+      try {
+        await sendReplyToPlatform(platform, platformUserId, MESSAGES.routing.rateLimited);
+      } catch (err) {
+        console.error(`[${platform}] Failed to send rate-limit notice:`, err.message);
+      }
+    }
+    return;
+  }
 
   // A customer edited an earlier message: show the agent the new text, but do
   // not run the AI or reply again.
@@ -442,11 +474,13 @@ async function forwardToRocketChat(platform, platformUserId, name, text, options
     }
   }
 
+  timer.mark('ai');
   try {
     const { visitorToken, roomId } = await ensureRocketChatRoom(platform, platformUserId, name);
 
     // 4. Send the visitor message into the room.
     await rocketchat.sendMessageToRocketChat(visitorToken, roomId, text);
+    timer.mark('rocketchat');
 
     // 5. If AI handled it, also send the AI reply into the room so the agent
     //    can see the full AI conversation in Omnichannel, AND send it to the
@@ -459,6 +493,7 @@ async function forwardToRocketChat(platform, platformUserId, name, text, options
       );
       try {
         await sendReplyToPlatform(platform, platformUserId, aiReply);
+        timer.mark('reply');
       } catch (err) {
         console.error(`[${platform}] Failed to send AI reply back to platform:`, err.message);
       }
@@ -532,8 +567,10 @@ function enqueueFacebookTask(psid, dedupeKey, task) {
     facebookInFlight.add(id);
   }
 
+  const queuedAt = Date.now();
   facebookQueue.enqueue(`facebook:${psid}`, async () => {
     try {
+      console.log(`[timing] facebook:${psid} queue-wait=${Date.now() - queuedAt}ms`);
       await task();
     } finally {
       if (id) {
@@ -569,13 +606,12 @@ app.post('/webhook/facebook', (req, res) => {
 // ============================================================
 
 app.post('/webhook/telegram', async (req, res) => {
-  if (ENV.telegramWebhookSecret) {
-    const expected = Buffer.from(ENV.telegramWebhookSecret);
-    const received = Buffer.from(String(req.get('X-Telegram-Bot-Api-Secret-Token') || ''));
-    if (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) {
-      return res.sendStatus(401);
-    }
-  }
+  const rejection = telegramWebhookRejection({
+    pollingEnabled: TELEGRAM_POLLING_ENABLED,
+    secret: ENV.telegramWebhookSecret,
+    header: req.get('X-Telegram-Bot-Api-Secret-Token'),
+  });
+  if (rejection) return res.sendStatus(rejection);
   try {
     await telegram.handleWebhook(req.body, async (chatId, text, meta) => {
       await forwardToRocketChat('telegram', chatId, `TG ${chatId}`, text, meta);
@@ -592,7 +628,18 @@ app.post('/webhook/telegram', async (req, res) => {
 // ============================================================
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', activeRooms: mapping.getActiveEntries().length });
+  const m = metrics.snapshot();
+  res.json({
+    status: 'ok',
+    activeRooms: mapping.getActiveEntries().length,
+    facebookQueueDepth: facebookQueue.size(),
+    lastAgentPollAt: m.lastAgentPollAt || null,
+    lastTelegramPollAt: m.lastTelegramPollAt || null,
+    rocketChat429: m.rateLimited429,
+    customerRateLimited: rateLimiter.limitedTotal(),
+    facebookTokenConfigured: Boolean(ENV.facebookPageAccessToken),
+    uptimeSeconds: Math.round((Date.now() - m.startedAt) / 1000),
+  });
 });
 
 // ============================================================
@@ -631,6 +678,7 @@ app.get('/documents', (req, res) => {
 async function pollTelegramUpdates() {
   if (telegramPollingInProgress) return;
   telegramPollingInProgress = true;
+  metrics.set('lastTelegramPollAt', Date.now());
   try {
     await telegram.pollUpdates(async (chatId, text, meta) => {
       await forwardToRocketChat('telegram', chatId, `TG ${chatId}`, text, meta);
@@ -646,6 +694,7 @@ async function pollAgentMessages() {
   if (agentPollingInProgress) return;
   if (Date.now() < rocketChatPollingNotBefore) return;
   agentPollingInProgress = true;
+  metrics.set('lastAgentPollAt', Date.now());
 
   try {
   const activeEntries = mapping.getActiveEntries().filter((entry) => entry.roomId && entry.visitorToken);
