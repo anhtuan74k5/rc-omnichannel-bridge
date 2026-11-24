@@ -127,6 +127,23 @@ báo lúc khởi động vì webhook không có xác thực secret.
 
 `FB_VERIFY_TOKEN` và `FB_APP_SECRET` không được ghi vào log.
 
+### Kiểm tra token khi khởi động và mock server
+
+- Khi start, bridge gọi Facebook `/me` + `debug_token` và Telegram `getMe`, rồi ghi log
+  `Token OK` hoặc cảnh báo (`Token check FAILED`, `Token expires soon` khi còn < 7 ngày).
+  Lỗi chỉ cảnh báo, không làm sập bridge; token không bao giờ được in ra.
+- `FB_GRAPH_BASE_URL` và `TELEGRAM_API_BASE_URL` (tùy chọn) đổi gốc URL của Graph/Bot API,
+  mặc định giữ nguyên. Dùng để trỏ vào mock:
+
+```powershell
+node scripts/e2e/mock-platforms.js 4010
+```
+
+Mock tiêm lỗi qua `POST /__fault` (`{"platform":"facebook","fault":"fb-190","count":1}`):
+`fb-190`, `fb-551`, `fb-10`, `fb-2018278`, `fb-100`, `fb-rate`, `http-429`, `http-500`,
+`http-503`, `tg-401`, `tg-403`, `tg-400-parse`, `timeout`, `ok-token-expiring`.
+Chỉ chạy bridge thử nghiệm (cổng và `.env` riêng) với mock, không dùng cho bridge thật.
+
 ### Bảo vệ API tài liệu
 
 | Biến | Bắt buộc | Mô tả |

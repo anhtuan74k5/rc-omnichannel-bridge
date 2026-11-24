@@ -46,7 +46,8 @@ function normalizeAttachments(attachments) {
     .map((item) => (item.type === 'sticker' ? { ...item, type: 'image' } : item));
 }
 
-const MESSAGES_URL = () => `https://graph.facebook.com/${API.facebook.graphVersion}/me/messages`;
+const GRAPH_URL = () => `${API.facebook.graphBaseUrl}/${API.facebook.graphVersion}`;
+const MESSAGES_URL = () => `${GRAPH_URL()}/me/messages`;
 const MEDIA_ATTACHMENT_TYPES = new Set(['image', 'video', 'audio', 'file']);
 
 /**
@@ -223,7 +224,55 @@ async function sendMedia(psid, descriptor) {
   return data;
 }
 
+const TOKEN_EXPIRY_WARN_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Startup health check of the Page token via /me and debug_token. Never throws
+ * and never logs the token; returns {ok, status, ...} so callers can ignore it.
+ */
+async function checkToken() {
+  if (!ENV.facebookPageAccessToken) {
+    log.info('[facebook] Token check skipped: FB_PAGE_ACCESS_TOKEN not set.');
+    return { ok: false, status: 'missing' };
+  }
+  try {
+    const meRes = await fetchWithTimeout(`${GRAPH_URL()}/me?fields=id,name`, { headers: authHeaders() }, { retries: 0, timeoutMs: 8000 });
+    const me = await meRes.json();
+    if (!meRes.ok || me.error) {
+      const code = me.error && me.error.code;
+      log.warn('[facebook] Token check FAILED; sending will not work until fixed.', {
+        status: meRes.status, code, message: me.error && me.error.message,
+      });
+      return { ok: false, status: code === 190 ? 'invalid' : 'error', code };
+    }
+    let expiresAt = 0;
+    try {
+      const dbgRes = await fetchWithTimeout(
+        `${GRAPH_URL()}/debug_token?input_token=${encodeURIComponent(ENV.facebookPageAccessToken)}`,
+        { headers: authHeaders() }, { retries: 0, timeoutMs: 8000 }
+      );
+      const dbg = (await dbgRes.json()).data || {};
+      expiresAt = Number(dbg.expires_at) || 0;
+    } catch (error) {
+      log.warn('[facebook] debug_token unavailable; expiry unknown.', { error: error.message });
+    }
+    if (expiresAt > 0) {
+      const remaining = expiresAt * 1000 - Date.now();
+      if (remaining < TOKEN_EXPIRY_WARN_MS) {
+        log.warn('[facebook] Token expires soon; create a new token.', { expiresAt: new Date(expiresAt * 1000).toISOString() });
+        return { ok: true, status: 'expiring', pageId: me.id, expiresAt };
+      }
+    }
+    log.info('[facebook] Token OK', { page: me.name, pageId: me.id, expires: expiresAt ? new Date(expiresAt * 1000).toISOString() : 'never' });
+    return { ok: true, status: 'ok', pageId: me.id, expiresAt };
+  } catch (error) {
+    log.warn('[facebook] Token check could not reach Graph API.', { error: error.message });
+    return { ok: false, status: 'unreachable' };
+  }
+}
+
 module.exports = {
+  checkToken,
   MEDIA_ATTACHMENT_TYPES,
   handleVerify,
   handleWebhook,

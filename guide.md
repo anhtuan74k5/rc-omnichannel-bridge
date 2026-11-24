@@ -174,6 +174,10 @@ hồi.
 
 ## 9. Xử lý sự cố
 
+Khi khởi động, log có dòng `[facebook] Token OK` / `[telegram] Token OK`. Nếu thấy
+`Token check FAILED` hoặc `Token expires soon`, tạo lại token (mục 2) rồi khởi động lại;
+bridge vẫn chạy nhưng gửi tin sẽ lỗi cho đến khi sửa.
+
 | Triệu chứng | Nguyên nhân thường gặp | Cách xử lý |
 |---|---|---|
 | `fb:check` báo `Session has expired` / `code 190` | Token hết hạn hoặc bị thu hồi | Làm lại mục 2 |
