@@ -37,7 +37,23 @@ function isAllowedFacebookMediaUrl(value) {
   return ALLOWED_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix));
 }
 
-function filenameFromUrl(value, mimeType, fallbackBase) {
+/** Guess an extension from the first bytes when neither the URL nor the MIME type names one. */
+function sniffExtension(buffer) {
+  if (!buffer || buffer.length < 12) return '';
+  const ascii = (from, to) => buffer.toString('latin1', from, to);
+  if (ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WAVE') return '.wav';
+  if (ascii(4, 8) === 'ftyp') return ascii(8, 12).startsWith('M4A') ? '.m4a' : '.mp4';
+  if (ascii(0, 4) === 'OggS') return '.ogg';
+  if (ascii(0, 3) === 'ID3' || (buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0)) return '.mp3';
+  if (ascii(0, 4) === '%PDF') return '.pdf';
+  if (ascii(0, 4) === 'PK\u0003\u0004') return '.zip';
+  if (buffer[0] === 0x89 && ascii(1, 4) === 'PNG') return '.png';
+  if (buffer[0] === 0xff && buffer[1] === 0xd8) return '.jpg';
+  if (ascii(0, 3) === 'GIF') return '.gif';
+  return '';
+}
+
+function filenameFromUrl(value, mimeType, fallbackBase, buffer) {
   let name = '';
   try {
     name = decodeURIComponent(new URL(value).pathname.split('/').pop() || '');
@@ -46,7 +62,7 @@ function filenameFromUrl(value, mimeType, fallbackBase) {
   }
   if (/\.[A-Za-z0-9]{1,5}$/.test(name)) return name;
   const base = String(mimeType || '').split(';', 1)[0].trim().toLowerCase();
-  return `${fallbackBase}${EXTENSIONS_BY_MIME[base] || ''}`;
+  return `${fallbackBase}${EXTENSIONS_BY_MIME[base] || sniffExtension(buffer)}`;
 }
 
 async function downloadFacebookAttachment(url, { maxBytes = ENV.facebookMaxMediaBytes, fallbackName = 'facebook_file' } = {}) {
@@ -72,7 +88,7 @@ async function downloadFacebookAttachment(url, { maxBytes = ENV.facebookMaxMedia
   return {
     buffer,
     mimeType,
-    filename: filenameFromUrl(url, mimeType, fallbackName),
+    filename: filenameFromUrl(url, mimeType, fallbackName, buffer),
     size: buffer.length,
   };
 }
@@ -83,6 +99,7 @@ function isFacebookFileTooLarge(error) {
 
 module.exports = {
   downloadFacebookAttachment,
+  sniffExtension,
   isAllowedFacebookMediaUrl,
   isFacebookFileTooLarge,
 };
