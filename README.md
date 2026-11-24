@@ -535,3 +535,13 @@ scripts/smoke.md          Checklist kiểm thử thủ công
   Không có bí mật.
 - **Route Telegram webhook**: khi `TELEGRAM_POLLING=true` route trả `404`; khi dùng
   webhook thì kiểm tra `TELEGRAM_WEBHOOK_SECRET` (`401` nếu sai).
+
+## Phát triển: lint, test và CI
+
+```bash
+npm ci          # cài đúng theo package-lock.json
+npm run lint    # ESLint (eslint.config.js); chỉ fail khi có error, warning hiện được ghi ở docs/lint-baseline.md
+npm test        # node --test
+```
+
+CI (`.github/workflows/ci.yml`) chạy trên mỗi push và pull request với Node 20 và 22: `npm ci`, `npm run lint`, `npm test`. Không dùng secret. Định dạng mã theo `.editorconfig` (UTF-8, LF, indent 2 dấu cách).
