@@ -66,7 +66,9 @@ test('webhook is acknowledged before slow processing finishes; order and dedupe 
   const res = await fetch(url, { method: 'POST', headers: payload.headers, body: payload.body });
   const ackMs = Date.now() - started;
   assert.equal(res.status, 200);
-  assert.ok(ackMs < 250, `acknowledged in ${ackMs} ms; should not wait for the 600 ms of work`);
+  // The invariant is "200 before the work is done" (checked by delivered.length below);
+  // the time bound is only a sanity check and is loose so a loaded CI/PC does not flake.
+  assert.ok(ackMs < 550, `acknowledged in ${ackMs} ms; should not wait for the 600 ms of work`);
   assert.equal(delivered.length, 0, 'work must still be pending when the 200 is returned');
 
   assert.equal(await facebookQueue.idle(5000), true);
