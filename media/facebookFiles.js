@@ -54,7 +54,8 @@ async function downloadFacebookAttachment(url, { maxBytes = ENV.facebookMaxMedia
     throw createError(ERRORS.facebook.mediaUrlRejected, FACEBOOK_URL_REJECTED);
   }
 
-  const res = await fetchWithTimeout(url, {}, { timeoutMs: ENV.httpUploadTimeoutMs, retries: 2 });
+  // Never follow redirects: an allowed CDN host must not bounce us to an internal address.
+  const res = await fetchWithTimeout(url, { redirect: 'manual' }, { timeoutMs: ENV.httpUploadTimeoutMs, retries: 2 });
   if (!res.ok) throw new Error(ERRORS.facebook.mediaDownloadFailed(res.status));
 
   const declared = Number(res.headers.get('content-length'));

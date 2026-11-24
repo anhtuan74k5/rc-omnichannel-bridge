@@ -12,7 +12,7 @@
  *   DELETE /__fault           clears all faults
  *   GET  /__requests          requests received so far (no tokens, no bodies)
  * Fault names: fb-190, fb-551, fb-10, fb-2018278, fb-100, fb-rate (code 4),
- *   http-429, http-500, http-503, tg-401, tg-403, tg-400-parse,
+ *   http-429, http-500, http-503, tg-401, tg-403, tg-400-chat, tg-400-parse,
  *   timeout (never answers), ok-token-expiring (debug_token expires in 1 h).
  */
 
@@ -34,6 +34,7 @@ const FAULTS = {
   'http-503': () => [503, { ok: false, description: 'Service Unavailable' }],
   'tg-401': () => [401, { ok: false, error_code: 401, description: 'Unauthorized' }],
   'tg-403': () => [403, { ok: false, error_code: 403, description: 'Forbidden: bot was blocked by the user' }],
+  'tg-400-chat': () => [400, { ok: false, error_code: 400, description: 'Bad Request: chat not found' }],
   'tg-400-parse': () => [400, { ok: false, error_code: 400, description: "Bad Request: can't parse entities" }],
 };
 const SPECIAL = ['timeout', 'ok-token-expiring'];
