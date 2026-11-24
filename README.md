@@ -12,8 +12,8 @@ Bridge đảm nhiệm:
 - Lưu mapping visitor/room để tiếp tục sử dụng sau khi restart.
 - Hỏi đáp bằng AI và tài liệu riêng theo từng người dùng.
 
-Facebook Messenger hiện chỉ xử lý text ở chiều nhận; luồng media chính đã được
-triển khai cho Telegram và chiều agent → Telegram.
+Cả Telegram và Facebook Messenger đều hỗ trợ media hai chiều (xem các mục bên
+dưới).
 
 ## Kiến trúc
 
@@ -100,6 +100,15 @@ Personal Access Token thay cho username/password.
 | `TELEGRAM_MAX_DOCUMENT_BYTES` | Không | Giới hạn document, mặc định 100 MB |
 | `TELEGRAM_RENDER_MARKDOWN` | Không | Mặc định `true`; đặt `false` để gửi tin agent dạng text thô |
 | `ROCKETCHAT_POLL_INTERVAL_MS` | Không | Chu kỳ polling Rocket.Chat, tối thiểu 10000 ms |
+| `ROCKETCHAT_POLL_MAX_CALLS_PER_MINUTE` | Không | Ngân sách số lần gọi `messages.history` mỗi phút cho **tất cả** phòng, mặc định 8 (ngưỡng mặc định của Rocket.Chat là 10) |
+| `ROCKETCHAT_HOT_WINDOW_MS` | Không | Phòng được coi là "đang hoạt động" trong khoảng này sau tin cuối, mặc định 10 phút |
+
+Polling chia sẻ ngân sách giữa các phòng: mỗi lượt chỉ poll số phòng vừa đủ ngân
+sách, ưu tiên phòng đang hoạt động nhưng phòng yên tĩnh vẫn đến lượt. Vì vậy độ
+trễ agent → khách tăng theo số phòng (khoảng `số phòng × chu kỳ` khi không có phòng
+nào đang hoạt động). Muốn nhanh hơn với nhiều phòng, tăng giới hạn ở Rocket.Chat
+(Administration → Settings → Rate Limiter → API) rồi tăng
+`ROCKETCHAT_POLL_MAX_CALLS_PER_MINUTE` tương ứng.
 
 `TELEGRAM_ALLOWED_CHAT_IDS` để trống nghĩa là cho phép mọi chat ID.
 
@@ -113,8 +122,10 @@ báo lúc khởi động vì webhook không có xác thực secret.
 | `FB_PAGE_ACCESS_TOKEN` | Có khi dùng Facebook | Page Access Token |
 | `FB_PAGE_ID` | Không | Page ID |
 | `FB_VERIFY_TOKEN` | Có khi bật webhook Facebook | Token xác minh webhook |
+| `FB_APP_SECRET` | Khuyến nghị | App Secret để kiểm tra chữ ký `X-Hub-Signature-256` |
+| `FB_MAX_MEDIA_BYTES` | Không | Giới hạn file Facebook, mặc định 25 MB (giới hạn của Messenger) |
 
-`FB_VERIFY_TOKEN` không được ghi vào log.
+`FB_VERIFY_TOKEN` và `FB_APP_SECRET` không được ghi vào log.
 
 ### Bảo vệ API tài liệu
 
@@ -239,6 +250,67 @@ ngrok http 3001
 ```
 
 Thay `3001` bằng giá trị `PORT` thực tế của bridge.
+
+Để không phải đổi callback URL mỗi lần chạy, dùng domain cố định: ngrok static
+domain miễn phí (`ngrok http --url=<ten>.ngrok-free.app 3001`) hoặc Cloudflare
+Tunnel.
+
+### Xác thực webhook
+
+Khi đặt `FB_APP_SECRET`, mọi `POST /webhook/facebook` phải có header
+`X-Hub-Signature-256` đúng (HMAC-SHA256 của body thô); sai hoặc thiếu trả `401`
+và không được xử lý. Nếu để trống, bridge ghi cảnh báo lúc khởi động vì webhook
+không được xác thực.
+
+### Xử lý webhook: trả lời nhanh, đúng thứ tự, không trùng
+
+Bridge trả `200` ngay sau khi kiểm tra chữ ký, rồi xử lý trong hàng đợi:
+
+- Meta chỉ chờ khoảng 20 giây; AI hoặc Rocket.Chat chậm sẽ không làm Meta gửi lại.
+- Tin của **cùng một khách** được xử lý tuần tự đúng thứ tự đến; các khách khác xử
+  lý song song.
+- Tin Meta gửi lại (cùng `message.mid`) bị bỏ qua, kể cả sau khi khởi động lại (id
+  lưu trong `mapping.json`, giữ 100 id gần nhất mỗi khách).
+- Khi dừng bridge bằng Ctrl+C/SIGTERM, bridge chờ tối đa 10 giây để xử lý nốt hàng
+  đợi.
+- Hệ quả: lỗi xử lý nền không còn trả `500` cho Meta; xem log `[facebook]`.
+
+### Hội thoại: AI, phòng đóng, lỗi gửi, tin sửa
+
+- **AI nhường cho agent.** Khi AI chuyển cuộc trò chuyện cho agent (hoặc agent đã trả
+  lời), AI im lặng trong phòng đó `AI_RESUME_AFTER_MINUTES` phút (mặc định 30) và chỉ
+  thông báo chuyển agent **một lần**. Khách gõ `/bot` để bật lại AI. AI chậm quá
+  `AI_TIMEOUT_MS` thì chuyển cho agent.
+- **Agent đóng phòng.** Bridge phát hiện tin hệ thống `livechat-close`, ngừng poll phòng
+  đó, và tin tiếp theo của khách tự mở **phòng mới** (kể cả khi gửi tin bị Rocket.Chat
+  trả `room-closed`). Trạng thái AI của phòng cũ được xóa.
+- **Gửi thất bại.** Lỗi được phân loại: tạm thời (mạng, 5xx, giới hạn tốc độ) thì thử lại
+  tối đa `ROCKETCHAT_MAX_MESSAGE_RETRIES` lần; vĩnh viễn (khách chặn bot, ngoài cửa sổ
+  24 giờ của Messenger, nội dung bị từ chối) thì dừng ngay. Khi bỏ cuộc, bridge đăng
+  `⚠️ [Bridge] Không gửi được …` **vào phòng** để agent biết. Lỗi token (Facebook `190`,
+  Telegram `401`) in `[ALERT]` ra log.
+- **Khách sửa tin Telegram.** Bản sửa đến phòng dạng `✏️ (khách đã sửa tin) …`, không
+  chạy AI và không trả lời lại. Sửa chú thích ảnh/file bị bỏ qua.
+- **Tin dài.** Tin agent gửi Facebook được bỏ ký hiệu Markdown và tách ≤ 2000 ký tự,
+  ưu tiên cắt ở ranh giới dòng.
+- **Sticker Facebook.** Meta gửi mỗi sticker hai lần (`image` và `sticker`); bridge chỉ
+  tải một ảnh.
+
+### Media
+
+| Hướng | Hỗ trợ |
+|---|---|
+| Facebook → Rocket.Chat | Ảnh, video, audio, file (tải từ CDN của Meta rồi upload vào room); vị trí gửi dạng link bản đồ |
+| Rocket.Chat → Facebook | Ảnh, GIF (gửi như ảnh), video, audio/voice, file qua Send API |
+
+- Messenger không có caption: text kèm file được gửi thành tin nhắn riêng ngay
+  sau file.
+- Chỉ tải URL `https` thuộc `fbcdn.net`, `fbsbx.com`, `facebook.com`; URL khác bị
+  từ chối.
+- File vượt `FB_MAX_MEDIA_BYTES` bị từ chối và khách nhận thông báo.
+- Page Access Token được gửi qua header `Authorization`, không nằm trong URL.
+- Webhook cần đăng ký field `messages` (và `message_echoes` là không bắt buộc;
+  tin echo luôn bị bỏ qua).
 
 ## API của bridge
 
