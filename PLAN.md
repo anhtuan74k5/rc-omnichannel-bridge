@@ -193,16 +193,16 @@ sách: bỏ qua, hoặc gửi "✏️ (đã sửa) …". Cần quyết định.
 
 | # | Vấn đề | Cách xử lý |
 |---|---|---|
-| G9 | Tên khách hiển thị `FB <psid>` / `TG <id>` | Telegram: lấy `first_name/username` từ update. Facebook: gọi User Profile API (`/{psid}?fields=name`) nếu app có quyền, rơi về `FB <psid>` |
-| G10 | Log AI in nội dung tin khách (`Asking AI to handle: "…"`) | Chỉ log độ dài; mask PII; giữ nguyên nguyên tắc "không log nội dung" |
-| G11 | Không có đo độ trễ/chỉ số vận hành | Thêm log thời gian từng chặng (nhận → RC → gửi), mở rộng `/health` (số phòng, độ sâu hàng đợi, lần poll cuối, số 429, trạng thái token Facebook) |
-| G12 | `REQUEST_BODY_LIMIT=100mb` áp cho **mọi** route, kể cả webhook công khai | Giới hạn nhỏ cho `/webhook/*` (ví dụ 1 MB), lớn chỉ cho `/documents/upload` |
-| G13 | Không giới hạn tốc độ theo khách: một người spam gây tốn tiền AI và đầy phòng | Rate limit theo `platform:userId` (ví dụ 20 tin/phút), vượt thì báo một lần và bỏ qua |
+| G9 ✅ | Tên khách hiển thị `FB <psid>` / `TG <id>` | Telegram: lấy `first_name/username` từ update. Facebook: gọi User Profile API (`/{psid}?fields=name`) nếu app có quyền, rơi về `FB <psid>` |
+| G10 ✅ | Log AI in nội dung tin khách (`Asking AI to handle: "…"`) | Chỉ log độ dài; mask PII; giữ nguyên nguyên tắc "không log nội dung" |
+| G11 ✅ | Không có đo độ trễ/chỉ số vận hành | Thêm log thời gian từng chặng (nhận → RC → gửi), mở rộng `/health` (số phòng, độ sâu hàng đợi, lần poll cuối, số 429, trạng thái token Facebook) |
+| G12 ✅ | `REQUEST_BODY_LIMIT=100mb` áp cho **mọi** route, kể cả webhook công khai | Giới hạn nhỏ cho `/webhook/*` (ví dụ 1 MB), lớn chỉ cho `/documents/upload` |
+| G13 ✅ | Không giới hạn tốc độ theo khách: một người spam gây tốn tiền AI và đầy phòng | Rate limit theo `platform:userId` (ví dụ 20 tin/phút), vượt thì báo một lần và bỏ qua |
 | G14 | Không thể giả lập lỗi Graph/Telegram: URL cứng trong `constants/config.js` | Cho phép ghi đè `TELEGRAM_API_BASE_URL`, `FB_GRAPH_BASE_URL` để chạy mock server (điều kiện tiên quyết cho kiểm thử lỗi) |
 | G15 | Không có kiểm tra sức khỏe token lúc khởi động | Gọi `debug_token`/`/me` khi start, cảnh báo nếu lỗi hoặc sắp hết hạn |
 | G16 | Facebook voice clip/Telegram voice định dạng khác nhau | Cần kiểm tra Live: Messenger audio có nhận `.ogg` (opus) không; nếu không, chuyển `audio/mp4`/mp3 hoặc gửi dạng file |
 | G17 | ngrok free: có trang cảnh báo, giới hạn băng thông, tiến trình phải tự giữ sống | Chấp nhận khi dev; để production dùng VPS (xem README) |
-| G18 | Webhook Telegram vẫn nhận request khi đang chạy polling | Không hại, nhưng nên tắt route hoặc yêu cầu secret khi `TELEGRAM_POLLING=true` |
+| G18 ✅ | Webhook Telegram vẫn nhận request khi đang chạy polling | Không hại, nhưng nên tắt route hoặc yêu cầu secret khi `TELEGRAM_POLLING=true` |
 
 ### P3: cải tiến tùy chọn
 
@@ -486,3 +486,15 @@ Sản phẩm giao:
 5. **Thứ tự**: làm hết mục 7 theo trình tự, hay ưu tiên sửa P0 (G1, G2) trước rồi mới kiểm
    thử toàn diện?
 6. **Phạm vi P3**: có làm typing/mark seen (Facebook), nút bấm (Telegram) không, hay để sau?
+
+
+## Trạng thái W7 + W8 (G9–G13, G18)
+
+Đã làm, có test tự động trong `test/ops-hardening.test.js` (chưa kiểm chứng trên giao diện thật):
+
+- G9: `customerNames.js` + `facebookProfile.js`; tên lưu vào `mapping.json` (`displayName`).
+- G10: không còn log nội dung tin khách; test quét mã nguồn để giữ nguyên tắc.
+- G11: `metrics.js`, log `[timing]`, `/health` mở rộng. Chưa có kiểm tra sức khỏe token Facebook (thuộc G15), chỉ báo token đã cấu hình hay chưa.
+- G12: `WEBHOOK_BODY_LIMIT=1mb` cho mọi route, `REQUEST_BODY_LIMIT` chỉ cho `/documents/upload`; `req.rawBody` vẫn được giữ.
+- G13: `rateLimiter.js`, `RATE_LIMIT_PER_MINUTE=20`. Áp ở đầu `forwardToRocketChat` (tin văn bản); media không bị đếm.
+- G18: `webhookGuards.js`; route Telegram webhook trả 404 khi `TELEGRAM_POLLING=true`.

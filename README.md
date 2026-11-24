@@ -146,7 +146,9 @@ Nếu chưa đặt `ADMIN_API_KEY`, hai endpoint tài liệu bị vô hiệu hó
 | `AI_MODEL` | `gpt-4o-mini` | Tên model |
 | `AI_BUSINESS_CONTEXT` | Rỗng | Thông tin doanh nghiệp được phép dùng |
 | `AI_HANDOFF_MESSAGE` | Theo `constants/messages.js` | Tin nhắn chuyển cho agent |
-| `REQUEST_BODY_LIMIT` | `2mb` | Giới hạn body Express |
+| `REQUEST_BODY_LIMIT` | `2mb` | Giới hạn body cho `/documents/upload` (chỉ route này) |
+| `WEBHOOK_BODY_LIMIT` | `1mb` | Giới hạn body cho mọi route còn lại, kể cả `/webhook/*`; vượt thì `413` |
+| `RATE_LIMIT_PER_MINUTE` | `20` | Số tin tối đa mỗi khách (`platform:userId`) mỗi phút. Vượt: bridge báo khách một lần, bỏ qua tin, không gọi AI. `0` = tắt |
 | `DOCUMENT_CHUNK_SIZE` | `1200` | Kích thước đoạn tài liệu |
 | `DOCUMENT_CHUNK_OVERLAP` | `150` | Phần chồng lấn giữa các đoạn |
 | `DOCUMENT_TOP_K` | `4` | Số đoạn dùng khi truy vấn |
@@ -483,3 +485,19 @@ constants/                Cấu hình, message và error
 test/                     Bộ test node:test
 scripts/smoke.md          Checklist kiểm thử thủ công
 ```
+
+## Vận hành: tên khách, chỉ số và giới hạn
+
+- **Tên khách**: Telegram dùng `first_name last_name` (hoặc `@username`) trong update;
+  Facebook gọi User Profile API (`/{psid}?fields=name`, cần quyền của Page). Lỗi thì
+  dùng `TG <id>` / `FB <psid>`. Tên chỉ được dùng khi tạo visitor và lưu vào
+  `mapping.json` (`displayName`), nên không gọi lại cho mỗi tin.
+- **Log**: bridge chỉ ghi độ dài tin nhắn, không ghi nội dung. Mỗi tin có một dòng
+  `[timing] <platform>:<id> ai=..ms rocketchat=..ms reply=..ms total=..ms`; tin
+  Facebook có thêm `queue-wait` (chờ trong hàng đợi).
+- **`GET /health`** trả về: `activeRooms`, `facebookQueueDepth`, `lastAgentPollAt`,
+  `lastTelegramPollAt`, `rocketChat429` (số lần bị Rocket.Chat/Graph/Telegram trả 429),
+  `customerRateLimited`, `facebookTokenConfigured` (chỉ true/false), `uptimeSeconds`.
+  Không có bí mật.
+- **Route Telegram webhook**: khi `TELEGRAM_POLLING=true` route trả `404`; khi dùng
+  webhook thì kiểm tra `TELEGRAM_WEBHOOK_SECRET` (`401` nếu sai).

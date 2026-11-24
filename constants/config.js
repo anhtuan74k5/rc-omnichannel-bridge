@@ -8,6 +8,8 @@ const DEFAULTS = Object.freeze({
   pollingIntervalMs: 10000,
   telegramPollIntervalMs: 2000,
   requestBodyLimit: '2mb',
+  webhookBodyLimit: '1mb',
+  rateLimitPerMinute: 20,
   telegramMaxDocumentBytes: 100 * 1024 * 1024,
   telegramMaxMediaBytes: 20 * 1024 * 1024,
   // Messenger Send API accepts attachments up to 25 MB.
@@ -141,6 +143,10 @@ const ENV = Object.freeze({
   ),
   port: process.env.PORT || DEFAULTS.port,
   requestBodyLimit: process.env.REQUEST_BODY_LIMIT || DEFAULTS.requestBodyLimit,
+  // Public webhooks never need a large body; only /documents/upload uses requestBodyLimit.
+  webhookBodyLimit: process.env.WEBHOOK_BODY_LIMIT || DEFAULTS.webhookBodyLimit,
+  // Messages per customer per minute; 0 disables the limit.
+  rateLimitPerMinute: Math.max(0, Number(process.env.RATE_LIMIT_PER_MINUTE || DEFAULTS.rateLimitPerMinute)),
   aiEnabled: process.env.AI_ENABLED === 'true',
   aiApiKey: process.env.AI_API_KEY || '',
   aiBaseUrl: (process.env.AI_BASE_URL || DEFAULTS.aiBaseUrl).replace(/\/+$/, ''),
