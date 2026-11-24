@@ -69,7 +69,7 @@ test('G9: Facebook uses the profile lookup once, falls back on failure', async (
 
 test('G10: AI and platform modules never log customer message text', () => {
   const root = path.join(__dirname, '..');
-  const ai = fs.readFileSync(path.join(root, 'ai.js'), 'utf8');
+  const ai = fs.readFileSync(path.join(root, 'knowledge', 'ai.js'), 'utf8');
   assert.doesNotMatch(ai, /Asking AI to handle:/);
   for (const line of ai.split('\n').filter((l) => /(console|log)\.(log|info|warn|error)/.test(l))) {
     assert.doesNotMatch(line, /customerMessage(?!\)\.length)/, line);

@@ -17,11 +17,11 @@
 
 const documents = require('./documents');
 const liveLookup = require('./liveLookup');
-const { fetchWithTimeout } = require('./httpClient');
-const { log } = require('./logger');
-const { ENV } = require('./constants/config');
-const { ERRORS } = require('./constants/errors');
-const { MESSAGES } = require('./constants/messages');
+const { fetchWithTimeout } = require('../httpClient');
+const { log } = require('../logger');
+const { ENV } = require('../constants/config');
+const { ERRORS } = require('../constants/errors');
+const { MESSAGES } = require('../constants/messages');
 
 const AI_ENABLED = ENV.aiEnabled;
 const AI_API_KEY = ENV.aiApiKey;

@@ -26,7 +26,7 @@ const COUNTRY_ALIASES = new Map([
   ['china', 'Q148'],
 ]);
 
-const { MESSAGES, WEATHER_CODES } = require('./constants/messages');
+const { MESSAGES, WEATHER_CODES } = require('../constants/messages');
 
 function formatTemperature(value) {
   return String(value);

@@ -512,7 +512,7 @@ facebook.js              Facebook webhook và gửi text
 rocketchat.js            Rocket.Chat Livechat API
 rcWebhook.js              Nhận webhook Omnichannel, nhịp polling dự phòng
 textFormat.js            Chuẩn hóa text, shortcode và tách grapheme
-documents.js              Lưu/index tài liệu theo từng user
+knowledge/documents.js    Lưu/index tài liệu theo từng user
 mapping.js                Lưu mapping visitor và room
 media/                    Tải, phân loại và chuyển media
 constants/                Cấu hình, message và error
