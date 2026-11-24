@@ -7,6 +7,7 @@ const rocketchat = require('../rocketchat/rocketchat');
 const facebook = require('../platforms/facebook');
 const telegram = require('../platforms/telegram');
 const { ENV } = require('../constants/config');
+const { MESSAGES } = require('../constants/messages');
 const { dumpRocketChatMessage } = require('../lib/debugDump');
 const { downloadRocketChatFile, isPermanentDownloadError } = require('../media/rocketchatFiles');
 const { classifyDeliveryError } = require('../core/deliveryErrors');
@@ -99,7 +100,7 @@ function deliverAgentMessages(entry, messages, closed = Boolean(messages.closed)
               attachmentFailed = true;
             }
             try {
-              await sendReplyToPlatform(entry.platform, entry.platformUserId, mediaDeliveryFailedMessage(entry.platform));
+              await sendReplyToPlatform(entry.platform, entry.platformUserId, mediaDeliveryFailedMessage(entry.platform, attachment.filename));
             } catch (noticeErr) {
               console.error('[poll] Failed to send attachment error notice:', noticeErr.message);
             }
@@ -158,8 +159,22 @@ function deliverAgentMessages(entry, messages, closed = Boolean(messages.closed)
     // The agent closed the conversation and everything was delivered: stop
     // polling this room; the customer's next message opens a fresh one.
     if (closed && !deliveryPending) {
+      // Webhook and polling can both report the close; only the first one
+      // (the room is still set) tells the customer.
+      const firstClose = Boolean(entry.roomId);
       mapping.update(entry, { roomId: null, ...rocketchat.roomStateReset() });
       console.log(`[poll] Conversation closed by the agent for ${entry.platform}:${entry.platformUserId}.`);
+      if (firstClose && ENV.conversationClosedNotice) {
+        try {
+          await sendReplyToPlatform(
+            entry.platform,
+            entry.platformUserId,
+            ENV.conversationClosedMessage || MESSAGES.bridge.conversationClosed
+          );
+        } catch (err) {
+          console.error('[poll] Failed to send the conversation-closed notice:', err.message);
+        }
+      }
     }
     return { pending: deliveryPending };
   });

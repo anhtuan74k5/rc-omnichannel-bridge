@@ -42,6 +42,7 @@ const SPECIAL = ['timeout', 'ok-token-expiring'];
 function createMock() {
   const queues = { facebook: [], telegram: [] };
   const requests = [];
+  const updates = []; // returned (once) by the next getUpdates call
   let sequence = 1000;
 
   function takeFault(platform) {
@@ -92,7 +93,12 @@ function createMock() {
     if (!platform) return reply(res, 404, { error: 'not found' });
 
     const route = telegram ? telegram[1] : graph[1];
-    requests.push({ platform, method: req.method, route, bytes: body.length, contentType: req.headers['content-type'] || '' });
+    const contentType = req.headers['content-type'] || '';
+    requests.push({
+      platform, method: req.method, route, bytes: body.length, contentType,
+      // JSON bodies only (Send API text), never multipart uploads; tokens travel in headers.
+      json: contentType.includes('application/json') ? body.toString() : undefined,
+    });
 
     const fault = takeFault(platform);
     if (fault === 'timeout') return; // never answers; the client's timeout applies
@@ -115,7 +121,7 @@ function createMock() {
     }
 
     if (route === 'getMe') return reply(res, 200, { ok: true, result: { id: 1, is_bot: true, username: 'mock_bot' } });
-    if (route === 'getUpdates') return reply(res, 200, { ok: true, result: [] });
+    if (route === 'getUpdates') return reply(res, 200, { ok: true, result: updates.splice(0) });
     if (route === 'getFile') return reply(res, 200, { ok: true, result: { file_path: 'docs/a.txt' } });
     sequence += 1;
     return reply(res, 200, { ok: true, result: { message_id: sequence } });
@@ -132,6 +138,7 @@ function createMock() {
       server.close(resolve);
     }),
     inject: (platform, fault, count = 1) => queues[platform].push({ fault, count }),
+    queueUpdates: (list) => updates.push(...list),
     clear: () => {
       queues.facebook.length = 0;
       queues.telegram.length = 0;

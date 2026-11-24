@@ -143,9 +143,35 @@ function authHeaders(extra = {}) {
  * Send a text message to a Facebook user via Graph API.
  * POST https://graph.facebook.com/<version>/me/messages
  */
-async function sendTextPart(psid, text) {
+/** Outside the 24 h standard messaging window (Graph code 10 / subcode 2018278). */
+function isOutsideMessagingWindow(error) {
+  return Boolean(error) && (error.code === 10 || error.subcode === 2018278);
+}
+
+/**
+ * Opt-in (FB_HUMAN_AGENT_TAG=true): when Meta refuses a reply because the 24 h
+ * window passed, send it again with the HUMAN_AGENT tag, which allows replies
+ * from a human agent for 7 days. Without the tag permission Meta refuses again
+ * and the usual failure notice reaches the agent.
+ */
+async function withHumanAgentFallback(send, psid) {
+  try {
+    return await send(false);
+  } catch (error) {
+    if (!ENV.facebookHumanAgentTag || !isOutsideMessagingWindow(error)) throw error;
+    log.info('[facebook] 24 h window passed; retrying with the HUMAN_AGENT tag', { psid });
+    return send(true);
+  }
+}
+
+function sendTextPart(psid, text) {
+  return withHumanAgentFallback((tagged) => postTextPart(psid, text, tagged), psid);
+}
+
+async function postTextPart(psid, text, tagged) {
   const body = {
-    messaging_type: 'RESPONSE',
+    messaging_type: tagged ? 'MESSAGE_TAG' : 'RESPONSE',
+    ...(tagged ? { tag: 'HUMAN_AGENT' } : {}),
     recipient: { id: psid },
     message: { text },
   };
@@ -200,11 +226,15 @@ async function sendMedia(psid, descriptor) {
   if (!descriptor || !Buffer.isBuffer(descriptor.buffer) || descriptor.buffer.length === 0) {
     throw new Error(ERRORS.facebook.mediaInvalidBuffer);
   }
+  return withHumanAgentFallback((tagged) => postMedia(psid, descriptor, tagged), psid);
+}
 
+async function postMedia(psid, descriptor, tagged) {
   const type = toAttachmentType(descriptor.kind);
   const form = new FormData();
   form.append('recipient', JSON.stringify({ id: psid }));
-  form.append('messaging_type', 'RESPONSE');
+  form.append('messaging_type', tagged ? 'MESSAGE_TAG' : 'RESPONSE');
+  if (tagged) form.append('tag', 'HUMAN_AGENT');
   form.append('message', JSON.stringify({ attachment: { type, payload: { is_reusable: false } } }));
   form.append('filedata', new Blob([descriptor.buffer], {
     type: descriptor.mimeType || MIME_TYPES.octetStream,

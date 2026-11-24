@@ -9,6 +9,10 @@ const MESSAGES = {
     deliveryFailed: (platform, what, reason) =>
       `⚠️ [Bridge] Không gửi được ${what} tới khách trên ${platform}: ${reason}.`,
     editedForRoom: (text) => `✏️ (khách đã sửa tin) ${text}`,
+    conversationClosed:
+      'Cuộc trò chuyện đã kết thúc. Nếu cần hỗ trợ thêm, bạn cứ nhắn tin lại nhé!',
+    unsupportedFileType: (platform) =>
+      `${platform === 'facebook' ? 'Messenger' : 'Nền tảng này'} không hỗ trợ gửi loại file này (ví dụ file nén .zip). Vui lòng gửi dạng ảnh, PDF, video, âm thanh hoặc đường dẫn.`,
     aiReplyForRoom: (reply) => `🤖 AI: ${reply}`,
     aiHandoffForRoom: (message) => `🤖 AI: ${message}`,
     liveLookupContext: (context) =>

@@ -9,6 +9,9 @@
 
 require('dotenv').config();
 
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { rememberTelegramName } = require('../core/customerNames');
 const { API, DOCUMENT_EXTENSIONS, ENV, FILES, HEADERS, MIME_TYPES, TELEGRAM_MESSAGE_TYPES } = require('../constants/config');
 const { ERRORS } = require('../constants/errors');
@@ -17,7 +20,41 @@ const { fetchWithTimeout } = require('../lib/httpClient');
 const { log } = require('../lib/logger');
 const { buildTelegramMessages, telegramToRcText } = require('../core/textFormat');
 let lastUpdateId = 0;
+let offsetLoaded = false;
 const processedUpdateIds = new Set();
+
+// The last handled update_id is saved next to mapping.json so a restart does not
+// make Telegram deliver the previous update again. It is tied to the bot token
+// (a different bot has its own update_id sequence, a stale offset would skip it).
+function offsetFile() {
+  return `${process.env.MAPPING_FILE || path.join(__dirname, '..', '..', 'mapping.json')}.tgoffset`;
+}
+
+function tokenFingerprint() {
+  return crypto.createHash('sha256').update(String(ENV.telegramBotToken)).digest('hex').slice(0, 8);
+}
+
+function loadOffset() {
+  if (offsetLoaded) return;
+  offsetLoaded = true;
+  try {
+    const [fingerprint, id] = fs.readFileSync(offsetFile(), 'utf8').trim().split(':');
+    const value = Number(id);
+    if (fingerprint === tokenFingerprint() && Number.isFinite(value) && value > lastUpdateId) {
+      lastUpdateId = value;
+    }
+  } catch {
+    // no saved offset yet
+  }
+}
+
+function saveOffset() {
+  try {
+    fs.writeFileSync(offsetFile(), `${tokenFingerprint()}:${lastUpdateId}`);
+  } catch (err) {
+    log.warn('[telegram] Could not save the update offset', { error: err.message });
+  }
+}
 const updateRetryCounts = new Map();
 const MAX_PROCESSED_UPDATE_IDS = 1000;
 
@@ -103,6 +140,7 @@ async function handleWebhook(body, onMessage, onDocument, onUnsupportedMessage, 
 
 async function pollUpdates(onMessage, onDocument, onUnsupportedMessage, onMedia) {
   if (!ENV.telegramBotToken) return;
+  loadOffset();
 
   const params = new URLSearchParams({
     timeout: '0',
@@ -131,6 +169,7 @@ async function pollUpdates(onMessage, onDocument, onUnsupportedMessage, onMedia)
       rememberProcessedUpdate(updateId);
       updateRetryCounts.delete(updateId);
       lastUpdateId = updateId;
+      saveOffset();
     } catch (err) {
       const retries = (updateRetryCounts.get(updateId) || 0) + 1;
       updateRetryCounts.set(updateId, retries);
@@ -151,6 +190,7 @@ async function pollUpdates(onMessage, onDocument, onUnsupportedMessage, onMedia)
       rememberProcessedUpdate(updateId);
       updateRetryCounts.delete(updateId);
       lastUpdateId = updateId;
+      saveOffset();
       break;
     }
   }

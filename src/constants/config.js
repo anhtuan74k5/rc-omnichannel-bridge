@@ -196,6 +196,13 @@ const ENV = Object.freeze({
     1,
     Number(process.env.ROCKETCHAT_MAX_MESSAGE_RETRIES || DEFAULTS.rocketChatMaxMessageRetries)
   ),
+  // Opt-in: after the 24 h window, retry the send with Meta's HUMAN_AGENT tag (7 days).
+  // Needs the "Human Agent" permission on the Meta app, otherwise Meta still refuses.
+  // (Getters: read when used, so tests and hot config changes need no reload.)
+  get facebookHumanAgentTag() { return process.env.FB_HUMAN_AGENT_TAG === 'true'; },
+  // Tell the customer when an agent ends the conversation (default on).
+  get conversationClosedNotice() { return process.env.CONVERSATION_CLOSED_NOTICE !== 'false'; },
+  get conversationClosedMessage() { return process.env.CONVERSATION_CLOSED_MESSAGE || ''; },
   rocketChatPollIntervalMs: Math.max(
     10000,
     Number(process.env.ROCKETCHAT_POLL_INTERVAL_MS || DEFAULTS.rocketChatPollIntervalMs)

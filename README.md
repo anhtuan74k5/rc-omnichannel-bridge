@@ -576,3 +576,16 @@ npm test        # node --test
 ```
 
 CI (`.github/workflows/ci.yml`) chạy trên mỗi push và pull request với Node 20 và 22: `npm ci`, `npm run lint`, `npm test`. Không dùng secret. Định dạng mã theo `.editorconfig` (UTF-8, LF, indent 2 dấu cách).
+
+## Kết thúc hội thoại, quá 24 giờ và khởi động lại
+
+- **Agent đóng phòng:** bridge gửi cho khách một tin "Cuộc trò chuyện đã kết thúc…" (đúng một lần,
+  dù webhook và polling cùng báo). Tắt bằng `CONVERSATION_CLOSED_NOTICE=false`, đổi nội dung bằng
+  `CONVERSATION_CLOSED_MESSAGE`. Tin tiếp theo của khách mở phòng mới.
+- **Facebook quá 24 giờ:** mặc định tin trả lời bị Meta từ chối và agent thấy thông báo `⚠️ [Bridge]`.
+  Đặt `FB_HUMAN_AGENT_TAG=true` để bridge thử lại một lần với tag `HUMAN_AGENT` (gửi được trong 7 ngày),
+  với điều kiện app Meta đã được cấp quyền "Human Agent".
+- **File nén (.zip, .rar, .7z) tới Messenger:** Messenger từ chối; khách nhận giải thích rõ thay vì
+  "thử lại sau".
+- **Khởi động lại bridge:** mốc `update_id` Telegram được lưu cạnh `mapping.json` (`*.tgoffset`, gắn
+  với bot token), nên khởi động lại không xử lý lại tin cuối.

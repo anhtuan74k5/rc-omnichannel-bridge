@@ -24,7 +24,13 @@ async function sendAttachmentToPlatform(platform, platformUserId, descriptor, ca
   }
 }
 
-function mediaDeliveryFailedMessage(platform) {
+// Messenger refuses archive files (seen live with .zip); retrying never helps.
+const MESSENGER_REFUSED_EXTENSIONS = /\.(zip|rar|7z)$/i;
+
+function mediaDeliveryFailedMessage(platform, filename = '') {
+  if (platform === 'facebook' && MESSENGER_REFUSED_EXTENSIONS.test(String(filename))) {
+    return MESSAGES.bridge.unsupportedFileType(platform);
+  }
   return platform === 'facebook' ? MESSAGES.facebook.mediaDeliveryFailed : MESSAGES.telegram.mediaDeliveryFailed;
 }
 
