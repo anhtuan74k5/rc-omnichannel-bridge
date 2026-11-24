@@ -74,7 +74,11 @@ test('G10: AI and platform modules never log customer message text', () => {
   for (const line of ai.split('\n').filter((l) => /(console|log)\.(log|info|warn|error)/.test(l))) {
     assert.doesNotMatch(line, /customerMessage(?!\)\.length)/, line);
   }
-  const index = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
+  const srcDir = path.join(root, 'src');
+  const sources = fs.readdirSync(srcDir, { recursive: true })
+    .filter((f) => f.endsWith('.js'))
+    .map((f) => fs.readFileSync(path.join(srcDir, f), 'utf8'));
+  const index = [fs.readFileSync(path.join(root, 'index.js'), 'utf8'), ...sources].join('\n');
   for (const line of index.split('\n').filter((l) => /console\.(log|warn)/.test(l))) {
     assert.doesNotMatch(line, /\$\{text\}|\$\{caption\}/, line);
   }
