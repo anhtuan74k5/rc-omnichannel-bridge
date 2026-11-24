@@ -506,18 +506,35 @@ Kiểm tra giá trị `TELEGRAM_WEBHOOK_SECRET` trên bridge có trùng với se
 ## Cấu trúc chính
 
 ```text
-index.js                 Express server, route và vòng polling
+index.js                  Điểm vào mỏng (npm start): nạp .env, chạy start(), re-export cho test
+src/
+  app.js                 Express app, body parser, error handler
+  server.js              start(): khởi động, vòng polling, tắt máy gọn
+  runtime.js             Singleton dùng chung: hàng đợi, rate limiter, rcWebhook
+  auth.js                authorizeAdmin (ADMIN_API_KEY)
+  routes/                facebook, telegram, rocketchat, health, documents
+  inbound/               Tin khách -> Rocket.Chat
+    forwardToRocketChat.js  AI auto-reply, rate limit, gửi vào phòng
+    rocketchatRoom.js       Tạo/giữ visitor + room
+    mediaPipeline.js        Tải -> upload -> báo lỗi, dùng chung Telegram/Facebook
+    telegram.js             Tài liệu, media, loại tin chưa hỗ trợ
+    facebook.js             Attachment và hàng đợi theo khách
+    pollTelegram.js         Polling Telegram
+  outbound/              Tin agent -> khách
+    deliverAgentMessages.js  Gửi (retry, dedupe), dùng cho polling và webhook
+    pollAgentMessages.js     Vòng polling Rocket.Chat dự phòng
+    sendReply.js / sendAttachment.js / deliveryNotices.js
+knowledge/               ai.js, documents.js, liveLookup.js, prompt.md
 telegram.js              Telegram webhook, polling và gửi media
 facebook.js              Facebook webhook và gửi text
 rocketchat.js            Rocket.Chat Livechat API
-rcWebhook.js              Nhận webhook Omnichannel, nhịp polling dự phòng
+rcWebhook.js             Nhận webhook Omnichannel, nhịp polling dự phòng
 textFormat.js            Chuẩn hóa text, shortcode và tách grapheme
-knowledge/documents.js    Lưu/index tài liệu theo từng user
-mapping.js                Lưu mapping visitor và room
-media/                    Tải, phân loại và chuyển media
-constants/                Cấu hình, message và error
-test/                     Bộ test node:test
-scripts/smoke.md          Checklist kiểm thử thủ công
+mapping.js               Lưu mapping visitor và room
+media/                   Tải, phân loại và chuyển media
+constants/               Cấu hình, message và error
+test/                    Bộ test node:test
+scripts/smoke.md         Checklist kiểm thử thủ công
 ```
 
 ## Vận hành: tên khách, chỉ số và giới hạn

@@ -10,6 +10,7 @@ const { MESSAGES } = require('../../constants/messages');
 const { downloadFacebookAttachment, isFacebookFileTooLarge } = require('../../media/facebookFiles');
 const { facebookQueue, facebookInFlight } = require('../runtime');
 const { ensureRocketChatRoom } = require('./rocketchatRoom');
+const { relayMediaToRocketChat } = require('./mediaPipeline');
 
 const FACEBOOK_MEDIA_TYPES = new Set(['image', 'video', 'audio', 'file']);
 
@@ -47,38 +48,23 @@ async function handleFacebookAttachment(psid, attachment) {
     return;
   }
 
-  let filename = `${type}_${Date.now()}`;
-  try {
-    const downloaded = await downloadFacebookAttachment(url, {
+  const fallbackName = `${type}_${Date.now()}`;
+  await relayMediaToRocketChat({
+    platform: CHANNELS.facebook,
+    userId: psid,
+    roomName: name,
+    type,
+    origin: `from ${psid}`,
+    filename: fallbackName,
+    download: () => downloadFacebookAttachment(url, {
       maxBytes: ENV.facebookMaxMediaBytes,
-      fallbackName: filename,
-    });
-    filename = downloaded.filename;
-    const { visitorToken, roomId } = await ensureRocketChatRoom(CHANNELS.facebook, psid, name);
-    await rocketchat.uploadLivechatFile(visitorToken, roomId, {
-      filename,
-      buffer: downloaded.buffer,
-      mimeType: downloaded.mimeType,
-    });
-  } catch (err) {
-    console.error(`[facebook] Failed to handle ${type} from ${psid}:`, err.message);
-    try {
-      await facebook.sendMessage(
-        psid,
-        isFacebookFileTooLarge(err) ? MESSAGES.facebook.mediaTooLarge : MESSAGES.facebook.mediaUploadFailed
-      );
-    } catch (sendErr) {
-      console.error(`[facebook] Failed to send ${type} error notice:`, sendErr.message);
-    }
-    try {
-      const { visitorToken, roomId } = await ensureRocketChatRoom(CHANNELS.facebook, psid, name);
-      await rocketchat.sendMessageToRocketChat(
-        visitorToken, roomId, MESSAGES.facebook.mediaUploadStatus(type, filename, err.message)
-      );
-    } catch (roomErr) {
-      console.error(`[rocketchat] Failed to log ${type} upload error:`, roomErr.message);
-    }
-  }
+      fallbackName,
+    }),
+    isTooLarge: isFacebookFileTooLarge,
+    sendNotice: (text) => facebook.sendMessage(psid, text),
+    notices: { tooLarge: MESSAGES.facebook.mediaTooLarge, failed: MESSAGES.facebook.mediaUploadFailed },
+    statusMessage: (filename, reason) => MESSAGES.facebook.mediaUploadStatus(type, filename, reason),
+  });
 }
 
 /**

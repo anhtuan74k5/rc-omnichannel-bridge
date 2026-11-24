@@ -10,6 +10,7 @@ const { MESSAGES } = require('../../constants/messages');
 const { downloadTelegramFile, isTelegramFileTooLarge } = require('../../media/telegramFiles');
 const { ensureRocketChatRoom } = require('./rocketchatRoom');
 const { forwardToRocketChat } = require('./forwardToRocketChat');
+const { relayMediaToRocketChat } = require('./mediaPipeline');
 
 function formatBytes(bytes) {
   const value = Number(bytes || 0);
@@ -138,43 +139,30 @@ async function handleTelegramMedia(chatId, messageType, media, caption) {
     return;
   }
 
-  try {
-    const downloaded = await downloadTelegramFile(descriptor.fileId, {
-      maxBytes: ENV.telegramMaxMediaBytes,
-    });
-    const { visitorToken, roomId } = await ensureRocketChatRoom(CHANNELS.telegram, chatId, `TG ${chatId}`);
-    await rocketchat.uploadLivechatFile(visitorToken, roomId, {
-      filename: descriptor.filename,
-      buffer: downloaded.buffer,
-      mimeType: descriptor.mimeType,
-    });
-    if (caption && caption.trim()) {
-      await forwardToRocketChat(CHANNELS.telegram, chatId, `TG ${chatId}`, caption.trim());
-    }
-  } catch (err) {
-    console.error(`[telegram] Failed to handle ${messageType} from chat ${chatId}:`, err.message);
-    try {
-      await telegram.sendMessage(
-        chatId,
-        isTelegramFileTooLarge(err)
-          ? MESSAGES.telegram.mediaTooLarge
-          : MESSAGES.telegram.mediaUploadFailed
-      );
-    } catch (sendErr) {
-      console.error(`[telegram] Failed to send ${messageType} error notice:`, sendErr.message);
-    }
-    try {
-      const { visitorToken, roomId } = await ensureRocketChatRoom(CHANNELS.telegram, chatId, `TG ${chatId}`);
-      await rocketchat.sendMessageToRocketChat(
-        visitorToken,
-        roomId,
-        MESSAGES.telegram.mediaUploadStatus(messageType, descriptor.filename, err.message)
-      );
-    } catch (roomErr) {
-      console.error(`[rocketchat] Failed to log ${messageType} upload error:`, roomErr.message);
-    }
-    if (!isTelegramFileTooLarge(err)) throw err;
-  }
+  await relayMediaToRocketChat({
+    platform: CHANNELS.telegram,
+    userId: chatId,
+    roomName: `TG ${chatId}`,
+    type: messageType,
+    origin: `from chat ${chatId}`,
+    filename: descriptor.filename,
+    download: async () => {
+      const downloaded = await downloadTelegramFile(descriptor.fileId, {
+        maxBytes: ENV.telegramMaxMediaBytes,
+      });
+      return { buffer: downloaded.buffer, filename: descriptor.filename, mimeType: descriptor.mimeType };
+    },
+    isTooLarge: isTelegramFileTooLarge,
+    sendNotice: (text) => telegram.sendMessage(chatId, text),
+    notices: { tooLarge: MESSAGES.telegram.mediaTooLarge, failed: MESSAGES.telegram.mediaUploadFailed },
+    statusMessage: (filename, reason) => MESSAGES.telegram.mediaUploadStatus(messageType, filename, reason),
+    afterUpload: async () => {
+      if (caption && caption.trim()) {
+        await forwardToRocketChat(CHANNELS.telegram, chatId, `TG ${chatId}`, caption.trim());
+      }
+    },
+    rethrow: true,
+  });
 }
 
 module.exports = { handleTelegramDocument, handleUnsupportedTelegramMessage, handleTelegramMedia };
