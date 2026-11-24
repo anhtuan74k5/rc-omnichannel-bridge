@@ -208,7 +208,46 @@ async function getOrCreateRoom(visitorToken) {
  * ---------------------------------------------------
  * POST /api/v1/livechat/message to send a visitor message into the room.
  */
-async function sendMessageToRocketChat(visitorToken, roomId, text) {
+// Per-conversation state that belongs to one room and must not leak into the next.
+const roomStateReset = () => ({
+  lastMessageTimestamp: 0,
+  processedMessageIds: [],
+  aiHandoffAt: 0,
+  agentActiveAt: 0,
+});
+
+/** The room the agent closed; the visitor's next message needs a fresh room. */
+function isRoomClosedError(error) {
+  return Boolean(error) && error.status === 400 && /room-closed/i.test(`${error.message} ${JSON.stringify(error.body || '')}`);
+}
+
+/** Closed rooms refuse uploads with a generic 401/403 `unauthorized`. */
+function isMaybeRoomClosedUpload(error) {
+  return Boolean(error) && (error.status === 401 || error.status === 403) && /unauthorized/i.test(error.message || '');
+}
+
+/**
+ * After a room was closed Rocket.Chat opens a new one on
+ * GET /livechat/room?token=... . Returns the new room id, or null when the room
+ * we used is still the current one (so the error was something else).
+ */
+async function resolveCurrentRoom(visitorToken, staleRoomId) {
+  return withMutex(roomMutexes, String(visitorToken), async () => {
+    const entry = mapping.findByVisitorToken(visitorToken);
+    // Another message already moved this customer to the new room.
+    if (entry && entry.roomId && entry.roomId !== staleRoomId) return entry.roomId;
+
+    const body = await rcFetch(`${API.rocketChat.roomPath}?token=${encodeURIComponent(visitorToken)}`);
+    const roomId = body && body.room && body.room._id;
+    if (!roomId || roomId === staleRoomId) return null;
+
+    if (entry) mapping.update(entry, { roomId, ...roomStateReset() });
+    log.info('[rocketchat] Room was closed; continuing in a new room', { roomId });
+    return roomId;
+  });
+}
+
+async function postVisitorMessage(visitorToken, roomId, text) {
   log.info('[rocketchat] Sending visitor message', { roomId, type: 'text', length: text.length });
   const body = await rcFetch(API.rocketChat.messagePath, {
     method: 'POST',
@@ -227,7 +266,29 @@ async function sendMessageToRocketChat(visitorToken, roomId, text) {
   return body;
 }
 
-async function uploadLivechatFile(visitorToken, roomId, { filename, buffer, mimeType, description }) {
+async function sendMessageToRocketChat(visitorToken, roomId, text) {
+  try {
+    return await postVisitorMessage(visitorToken, roomId, text);
+  } catch (error) {
+    if (!isRoomClosedError(error)) throw error;
+    const currentRoomId = await resolveCurrentRoom(visitorToken, roomId);
+    if (!currentRoomId) throw error;
+    return postVisitorMessage(visitorToken, currentRoomId, text);
+  }
+}
+
+async function uploadLivechatFile(visitorToken, roomId, file) {
+  try {
+    return await postLivechatFile(visitorToken, roomId, file);
+  } catch (error) {
+    if (!isMaybeRoomClosedUpload(error)) throw error;
+    const currentRoomId = await resolveCurrentRoom(visitorToken, roomId);
+    if (!currentRoomId) throw error;
+    return postLivechatFile(visitorToken, currentRoomId, file);
+  }
+}
+
+async function postLivechatFile(visitorToken, roomId, { filename, buffer, mimeType, description }) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
     throw new Error(ERRORS.rocketchat.uploadInvalidBuffer);
   }
@@ -258,7 +319,10 @@ async function uploadLivechatFile(visitorToken, roomId, { filename, buffer, mime
   }
 
   if (!res.ok || !body || body.success === false) {
-    throw new Error(ERRORS.rocketchat.uploadFailed(res.status, text));
+    const error = new Error(ERRORS.rocketchat.uploadFailed(res.status, text));
+    error.status = res.status;
+    error.body = body;
+    throw error;
   }
 
   log.info('[rocketchat] Visitor file uploaded successfully.');
@@ -374,10 +438,16 @@ async function pollNewAgentMessages(roomId, visitorToken, lastMessageTimestamp, 
     log.info('[rocketchat] Poll found new agent messages', { count: newMessages.length, roomId });
   }
 
+  // The agent (or an automation) closed the conversation: tell the caller so it
+  // can stop polling this room and open a new one on the customer's next message.
+  newMessages.closed = messages.some((m) => m.t === 'livechat-close');
   return newMessages;
 }
 
 module.exports = {
+  roomStateReset,
+  isRoomClosedError,
+  isMaybeRoomClosedUpload,
   loginAgent,
   getOrCreateVisitor,
   getOrCreateRoom,
