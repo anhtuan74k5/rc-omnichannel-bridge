@@ -51,6 +51,7 @@ async function handleWebhook(body, onMessage, onDocument, onUnsupportedMessage, 
   }
 
   const message = body.message || body.edited_message;
+  const edited = !body.message && Boolean(body.edited_message);
 
   if (!message) {
     log.info('[telegram] Received non-message update, ignoring.');
@@ -73,9 +74,15 @@ async function handleWebhook(body, onMessage, onDocument, onUnsupportedMessage, 
     return;
   }
 
+  // Editing a photo/file caption must not re-upload or re-announce the media.
+  if (edited && !text) {
+    log.info('[telegram] Ignoring edit of a non-text message', { chatId });
+    return;
+  }
+
   if (text) {
-    log.info('[telegram] Received message', { chatId, type: 'text', length: text.length });
-    await onMessage(chatId, text);
+    log.info('[telegram] Received message', { chatId, type: edited ? 'edited_text' : 'text', length: text.length });
+    await onMessage(chatId, text, { edited });
   } else if (document) {
     log.info('[telegram] Received document', { chatId, type: 'document', filenameLength: String(document.file_name || document.file_id || '').length });
     if (onDocument) {

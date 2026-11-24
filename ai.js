@@ -17,6 +17,8 @@
 
 const documents = require('./documents');
 const liveLookup = require('./liveLookup');
+const { fetchWithTimeout } = require('./httpClient');
+const { log } = require('./logger');
 const { ENV } = require('./constants/config');
 const { ERRORS } = require('./constants/errors');
 const { MESSAGES } = require('./constants/messages');
@@ -200,8 +202,11 @@ async function askAI(customerMessage, context = {}) {
     }
   }
 
-  console.log(`[ai] Asking AI to handle: "${customerMessage}"`);
-  const res = await fetch(`${AI_BASE_URL}/chat/completions`, {
+  // Log the size only: customer messages are personal data and stay out of logs.
+  log.info('[ai] Asking AI to handle a message', { length: String(customerMessage).length });
+  // A slow model must not hold the conversation forever: on timeout the caller
+  // falls back to the human agent.
+  const res = await fetchWithTimeout(`${AI_BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -212,7 +217,7 @@ async function askAI(customerMessage, context = {}) {
       messages,
       temperature: 0.3,
     }),
-  });
+  }, { timeoutMs: ENV.aiTimeoutMs, retries: 0 });
 
   const data = await res.json();
   if (!res.ok) {
@@ -229,7 +234,7 @@ async function askAI(customerMessage, context = {}) {
     console.log(`[ai] AI decision: handled=${parsed.handled}`);
     return parsed;
   } catch (err) {
-    console.warn('[ai] Could not parse AI response, defaulting to handoff:', content);
+    log.warn('[ai] Could not parse AI response, defaulting to handoff', { length: String(content).length });
     return { handled: false };
   }
 }

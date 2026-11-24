@@ -26,9 +26,12 @@ const documents = require('./documents');
 const { CHANNELS, DEFAULTS, ENV } = require('./constants/config');
 const { MESSAGES } = require('./constants/messages');
 const { dumpRocketChatMessage } = require('./debugDump');
-const { rcTimestampsToPlainText } = require('./textFormat');
 const { downloadRocketChatFile, isPermanentDownloadError } = require('./media/rocketchatFiles');
 const { downloadTelegramFile, isTelegramFileTooLarge } = require('./media/telegramFiles');
+const { downloadFacebookAttachment, isFacebookFileTooLarge } = require('./media/facebookFiles');
+const { classifyDeliveryError } = require('./deliveryErrors');
+const { createKeyedQueue } = require('./keyedQueue');
+const { callsPerTick, createPollScheduler } = require('./pollScheduler');
 
 
 const PORT = ENV.port;
@@ -38,7 +41,11 @@ const TELEGRAM_POLL_INTERVAL_MS = ENV.telegramPollIntervalMs;
 const AI_HANDOFF_MESSAGE = ENV.aiHandoffMessage || MESSAGES.ai.handoffDefault;
 
 const app = express();
-app.use(express.json({ limit: ENV.requestBodyLimit }));
+app.use(express.json({
+  limit: ENV.requestBodyLimit,
+  // Keep the raw bytes: Facebook's X-Hub-Signature-256 is computed over them.
+  verify: (req, res, buf) => { req.rawBody = buf; },
+}));
 
 let telegramPollingInProgress = false;
 let agentPollingInProgress = false;
@@ -47,6 +54,11 @@ const messageRetryCounts = new Map();
 const MAX_PROCESSED_MESSAGE_IDS = 200;
 const roomEnsureMutexes = new Map();
 const completedAttachmentKeys = new Map();
+const pollScheduler = createPollScheduler({ hotWindowMs: ENV.rocketChatHotWindowMs });
+const facebookQueue = createKeyedQueue({
+  onError: (err, key) => console.error(`[facebook] Background task failed for ${key}:`, err.message),
+});
+const facebookInFlight = new Set();
 
 // ============================================================
 // Shared handler: incoming platform message -> Rocket.Chat
@@ -70,13 +82,34 @@ async function sendReplyToPlatform(platform, platformUserId, text) {
   }
 }
 
+/** True while a human owns the conversation and the AI must not answer. */
+function isAiPaused(entry) {
+  if (!entry) return false;
+  const last = Math.max(Number(entry.aiHandoffAt) || 0, Number(entry.agentActiveAt) || 0);
+  return last > 0 && Date.now() - last < ENV.aiResumeAfterMs;
+}
+
+/** Tell the agent, inside the room, that a message could not reach the customer. */
+async function notifyDeliveryFailure(entry, what, reason) {
+  try {
+    await rocketchat.sendMessageToRocketChat(
+      entry.visitorToken,
+      entry.roomId,
+      MESSAGES.bridge.deliveryFailed(entry.platform, what, reason)
+    );
+  } catch (err) {
+    console.error('[poll] Failed to tell the agent about a delivery failure:', err.message);
+  }
+}
+
 async function ensureRocketChatRoom(platform, platformUserId, name) {
   const key = `${platform}:${String(platformUserId)}`;
   const previous = roomEnsureMutexes.get(key) || Promise.resolve();
   const task = async () => {
     const entry = mapping.getOrCreate(platform, platformUserId);
     const visitorToken = await rocketchat.getOrCreateVisitor(platformUserId, name);
-    mapping.update(entry, { visitorToken });
+    // lastInboundAt marks the room "hot" so the poller serves it more often.
+    mapping.update(entry, { visitorToken, lastInboundAt: Date.now() });
 
     const roomId = await rocketchat.getOrCreateRoom(visitorToken);
     mapping.update(entry, { roomId });
@@ -251,6 +284,101 @@ async function handleTelegramMedia(chatId, messageType, media, caption) {
   }
 }
 
+const FACEBOOK_MEDIA_TYPES = new Set(['image', 'video', 'audio', 'file']);
+
+/**
+ * Facebook attachment -> Rocket.Chat room. Images, videos, audio and files are
+ * downloaded from Meta's CDN and uploaded; locations become a map link.
+ */
+async function handleFacebookAttachment(psid, attachment) {
+  const type = attachment && attachment.type;
+  const name = `FB ${psid}`;
+  const url = attachment && attachment.payload && attachment.payload.url;
+
+  try {
+    if (type === 'location') {
+      const coords = attachment.payload && attachment.payload.coordinates;
+      if (coords && Number.isFinite(coords.lat) && Number.isFinite(coords.long)) {
+        const mapUrl = `https://www.google.com/maps?q=${coords.lat},${coords.long}`;
+        const { visitorToken, roomId } = await ensureRocketChatRoom(CHANNELS.facebook, psid, name);
+        await rocketchat.sendMessageToRocketChat(
+          visitorToken, roomId, MESSAGES.facebook.locationRoomMessage(attachment.title, mapUrl)
+        );
+        return;
+      }
+    }
+
+    if (!FACEBOOK_MEDIA_TYPES.has(type) || !url) {
+      const { visitorToken, roomId } = await ensureRocketChatRoom(CHANNELS.facebook, psid, name);
+      await rocketchat.sendMessageToRocketChat(
+        visitorToken, roomId, MESSAGES.facebook.unsupportedRoomMessage(type || 'unknown')
+      );
+      return;
+    }
+  } catch (err) {
+    console.error(`[facebook] Failed to log ${type} from ${psid}:`, err.message);
+    return;
+  }
+
+  let filename = `${type}_${Date.now()}`;
+  try {
+    const downloaded = await downloadFacebookAttachment(url, {
+      maxBytes: ENV.facebookMaxMediaBytes,
+      fallbackName: filename,
+    });
+    filename = downloaded.filename;
+    const { visitorToken, roomId } = await ensureRocketChatRoom(CHANNELS.facebook, psid, name);
+    await rocketchat.uploadLivechatFile(visitorToken, roomId, {
+      filename,
+      buffer: downloaded.buffer,
+      mimeType: downloaded.mimeType,
+    });
+  } catch (err) {
+    console.error(`[facebook] Failed to handle ${type} from ${psid}:`, err.message);
+    try {
+      await facebook.sendMessage(
+        psid,
+        isFacebookFileTooLarge(err) ? MESSAGES.facebook.mediaTooLarge : MESSAGES.facebook.mediaUploadFailed
+      );
+    } catch (sendErr) {
+      console.error(`[facebook] Failed to send ${type} error notice:`, sendErr.message);
+    }
+    try {
+      const { visitorToken, roomId } = await ensureRocketChatRoom(CHANNELS.facebook, psid, name);
+      await rocketchat.sendMessageToRocketChat(
+        visitorToken, roomId, MESSAGES.facebook.mediaUploadStatus(type, filename, err.message)
+      );
+    } catch (roomErr) {
+      console.error(`[rocketchat] Failed to log ${type} upload error:`, roomErr.message);
+    }
+  }
+}
+
+/**
+ * Send one Rocket.Chat attachment to the customer's platform. Telegram carries
+ * the caption natively; Messenger has no captions, so the text follows as a
+ * separate message (its failure is logged, not retried, to avoid re-sending
+ * the file).
+ */
+async function sendAttachmentToPlatform(platform, platformUserId, descriptor, caption) {
+  if (platform === 'telegram') {
+    await telegram.sendMedia(platformUserId, descriptor, caption, { markdown: true });
+    return;
+  }
+  await facebook.sendMedia(platformUserId, descriptor);
+  if (caption && caption.trim()) {
+    try {
+      await facebook.sendAgentMessage(platformUserId, caption, { timeZone: ENV.timezone });
+    } catch (err) {
+      console.error('[facebook] Failed to send attachment caption:', err.message);
+    }
+  }
+}
+
+function mediaDeliveryFailedMessage(platform) {
+  return platform === 'facebook' ? MESSAGES.facebook.mediaDeliveryFailed : MESSAGES.telegram.mediaDeliveryFailed;
+}
+
 /**
  * Given a platform user id, name and platform, ensure the visitor + room
  * exist on Rocket.Chat, then send the message into the room.
@@ -260,17 +388,53 @@ async function handleTelegramMedia(chatId, messageType, media, caption) {
  * customer AND logged into the Rocket.Chat room (so the agent sees the full
  * AI conversation in Omnichannel). If no (or AI disabled), hand off to agent.
  */
-async function forwardToRocketChat(platform, platformUserId, name, text) {
+async function forwardToRocketChat(platform, platformUserId, name, text, options = {}) {
+  const known = mapping.findByPlatformUser(platform, platformUserId);
 
-  // 0. Try AI auto-reply first (if enabled).
+  // A customer edited an earlier message: show the agent the new text, but do
+  // not run the AI or reply again.
+  if (options.edited) {
+    try {
+      const { visitorToken, roomId } = await ensureRocketChatRoom(platform, platformUserId, name);
+      await rocketchat.sendMessageToRocketChat(visitorToken, roomId, MESSAGES.bridge.editedForRoom(text));
+    } catch (err) {
+      console.error(`[rocketchat] Failed to forward an edited message for ${platform}:${platformUserId}:`, err.message);
+    }
+    return;
+  }
+
+  // `/bot` hands the conversation back to the AI.
+  if (ai.isEnabled() && /^\/bot$/i.test(String(text).trim())) {
+    if (known) mapping.update(known, { aiHandoffAt: 0, agentActiveAt: 0 });
+    try {
+      const { visitorToken, roomId } = await ensureRocketChatRoom(platform, platformUserId, name);
+      await rocketchat.sendMessageToRocketChat(visitorToken, roomId, MESSAGES.ai.resumedForRoom);
+    } catch (err) {
+      console.error(`[rocketchat] Failed to log AI resume for ${platform}:${platformUserId}:`, err.message);
+    }
+    try {
+      await sendReplyToPlatform(platform, platformUserId, MESSAGES.ai.resumed);
+    } catch (err) {
+      console.error(`[${platform}] Failed to confirm AI resume:`, err.message);
+    }
+    return;
+  }
+
+  // Once a human is involved the AI stays out of the way (until it times out or
+  // the customer types /bot), otherwise it would answer between agent messages.
+  const aiPaused = ai.isEnabled() && isAiPaused(known);
+
+  // 0. Try AI auto-reply first (if enabled and not paused).
   let aiReply = null;
-  if (ai.isEnabled()) {
+  let aiDeclined = false;
+  if (ai.isEnabled() && !aiPaused) {
     try {
       const decision = await ai.askAI(text, { platform, platformUserId });
       if (decision.handled && decision.reply) {
         aiReply = decision.reply;
         console.log(`[ai] AI auto-replied to ${platform}:${platformUserId}.`);
       } else {
+        aiDeclined = true;
         console.log(`[ai] AI cannot handle, handing off to agent for ${platform}:${platformUserId}.`);
       }
     } catch (err) {
@@ -298,12 +462,17 @@ async function forwardToRocketChat(platform, platformUserId, name, text) {
       } catch (err) {
         console.error(`[${platform}] Failed to send AI reply back to platform:`, err.message);
       }
-    } else if (ai.isEnabled()) {
+    } else if (ai.isEnabled() && !aiPaused) {
+      // Tell the customer once; from now on messages go straight to the agent.
       await rocketchat.sendMessageToRocketChat(
         visitorToken,
         roomId,
         MESSAGES.bridge.aiHandoffForRoom(AI_HANDOFF_MESSAGE)
       );
+      if (aiDeclined) {
+        const entry = mapping.findByPlatformUser(platform, platformUserId);
+        if (entry) mapping.update(entry, { aiHandoffAt: Date.now() });
+      }
       try {
         await sendReplyToPlatform(platform, platformUserId, AI_HANDOFF_MESSAGE);
       } catch (err) {
@@ -347,16 +516,52 @@ app.get('/webhook/facebook', (req, res) => {
   facebook.handleVerify(req, res);
 });
 
-app.post('/webhook/facebook', async (req, res) => {
-  try {
-    await facebook.handleWebhook(req.body, async (psid, text) => {
-      await forwardToRocketChat('facebook', psid, `FB ${psid}`, text);
-    });
-    res.sendStatus(200);
-  } catch (err) {
-    console.error('[facebook] Error handling webhook:', err.message);
-    res.sendStatus(500);
+/**
+ * Queue one Facebook message part. Parts of the same customer run in order;
+ * different customers run in parallel. A part already seen (Meta redelivers a
+ * webhook it considers unanswered) is dropped, also across restarts.
+ */
+function enqueueFacebookTask(psid, dedupeKey, task) {
+  const id = dedupeKey ? `${psid}:${dedupeKey}` : null;
+  if (id) {
+    const entry = mapping.getOrCreate(CHANNELS.facebook, psid);
+    if (facebookInFlight.has(id) || mapping.hasProcessedInbound(entry, dedupeKey)) {
+      console.log('[facebook] Duplicate delivery ignored.');
+      return;
+    }
+    facebookInFlight.add(id);
   }
+
+  facebookQueue.enqueue(`facebook:${psid}`, async () => {
+    try {
+      await task();
+    } finally {
+      if (id) {
+        facebookInFlight.delete(id);
+        mapping.markInboundProcessed(mapping.getOrCreate(CHANNELS.facebook, psid), dedupeKey);
+      }
+    }
+  });
+}
+
+app.post('/webhook/facebook', (req, res) => {
+  if (ENV.facebookAppSecret
+    && !facebook.verifySignature(req.rawBody, req.get('X-Hub-Signature-256'))) {
+    console.warn('[facebook] Rejected webhook with missing or invalid signature.');
+    return res.sendStatus(401);
+  }
+
+  // Acknowledge at once: Meta retries after ~20 s, but AI and Rocket.Chat can be
+  // slower than that. The real work continues in the per-customer queue.
+  res.sendStatus(200);
+
+  facebook.handleWebhook(
+    req.body,
+    (psid, text, meta) => enqueueFacebookTask(psid, meta && meta.key, () =>
+      forwardToRocketChat(CHANNELS.facebook, psid, `FB ${psid}`, text)),
+    (psid, attachment, meta) => enqueueFacebookTask(psid, meta && meta.key, () =>
+      handleFacebookAttachment(psid, attachment))
+  ).catch((err) => console.error('[facebook] Error handling webhook:', err.message));
 });
 
 // ============================================================
@@ -372,8 +577,8 @@ app.post('/webhook/telegram', async (req, res) => {
     }
   }
   try {
-    await telegram.handleWebhook(req.body, async (chatId, text) => {
-      await forwardToRocketChat('telegram', chatId, `TG ${chatId}`, text);
+    await telegram.handleWebhook(req.body, async (chatId, text, meta) => {
+      await forwardToRocketChat('telegram', chatId, `TG ${chatId}`, text, meta);
     }, handleTelegramDocument, handleUnsupportedTelegramMessage, handleTelegramMedia);
     res.sendStatus(200);
   } catch (err) {
@@ -427,8 +632,8 @@ async function pollTelegramUpdates() {
   if (telegramPollingInProgress) return;
   telegramPollingInProgress = true;
   try {
-    await telegram.pollUpdates(async (chatId, text) => {
-      await forwardToRocketChat('telegram', chatId, `TG ${chatId}`, text);
+    await telegram.pollUpdates(async (chatId, text, meta) => {
+      await forwardToRocketChat('telegram', chatId, `TG ${chatId}`, text, meta);
     }, handleTelegramDocument, handleUnsupportedTelegramMessage, handleTelegramMedia);
   } catch (err) {
     console.error('[telegram] Error polling updates:', err.message);
@@ -443,11 +648,19 @@ async function pollAgentMessages() {
   agentPollingInProgress = true;
 
   try {
-  const entries = mapping.getActiveEntries().filter((entry) => entry.roomId && entry.visitorToken);
-  if (entries.length === 0) return;
+  const activeEntries = mapping.getActiveEntries().filter((entry) => entry.roomId && entry.visitorToken);
+  if (activeEntries.length === 0) return;
+
+  // Rocket.Chat rate-limits messages.history, so spend a fixed call budget per
+  // tick on the rooms that most need a poll instead of polling all of them.
+  const entries = pollScheduler.select(
+    activeEntries,
+    callsPerTick(ENV.rocketChatPollMaxCallsPerMinute, POLL_INTERVAL_MS)
+  );
 
   for (const entry of entries) {
     try {
+      pollScheduler.markPolled(entry);
       const newMessages = await rocketchat.pollNewAgentMessages(
         entry.roomId,
         entry.visitorToken,
@@ -455,6 +668,12 @@ async function pollAgentMessages() {
         entry.processedMessageIds || []
       );
 
+      // A human answered: keep the AI quiet in this room for a while.
+      if (newMessages.some((m) => (m.msg && m.msg !== 'connected') || rocketchat.extractAttachments(m).length > 0)) {
+        mapping.update(entry, { agentActiveAt: Date.now() });
+      }
+
+      let deliveryPending = false; // a message is waiting for a retry
       for (const msg of newMessages) {
         try {
           dumpRocketChatMessage(msg);
@@ -470,34 +689,43 @@ async function pollAgentMessages() {
         const completed = completedAttachmentKeys.get(retryKey) || new Set();
         const pendingAttachments = attachments.filter((attachment) => !completed.has(attachment.source));
 
-        if (entry.platform === 'telegram' && attachments.length > 0 && text !== 'connected') {
+        if ((entry.platform === 'telegram' || entry.platform === 'facebook')
+          && attachments.length > 0 && text !== 'connected') {
           let attachmentFailed = false;
           for (const attachment of pendingAttachments) {
             const attachmentRetryKey = `${retryKey}:${attachment.source}`;
             try {
               const downloaded = await downloadRocketChatFile(attachment.source);
-              await telegram.sendMedia(entry.platformUserId, {
+              await sendAttachmentToPlatform(entry.platform, entry.platformUserId, {
                 ...attachment,
                 buffer: downloaded.buffer,
                 mimeType: downloaded.mimeType || attachment.mimeType,
                 filename: downloaded.filename || attachment.filename,
                 size: downloaded.buffer.length,
-              }, completed.size === 0 ? text : '', { markdown: true });
+              }, completed.size === 0 ? text : '');
               completed.add(attachment.source);
               messageRetryCounts.delete(attachmentRetryKey);
             } catch (err) {
-              console.error(`[poll] Failed to forward attachment ${attachment.filename} to Telegram:`, err.message);
-              const permanent = isPermanentDownloadError(err);
+              console.error(`[poll] Failed to forward attachment ${attachment.filename} to ${entry.platform}:`, err.message);
+              const failure = classifyDeliveryError(entry.platform, err);
+              if (failure.kind === 'auth') console.error(`[ALERT] ${entry.platform} credentials rejected: ${failure.reason}`);
+              const downloadFailed = isPermanentDownloadError(err);
+              const permanent = downloadFailed || failure.kind === 'permanent';
               const retries = (messageRetryCounts.get(attachmentRetryKey) || 0) + 1;
               if (permanent || retries >= ENV.rocketChatMaxMessageRetries) {
                 completed.add(attachment.source);
                 messageRetryCounts.delete(attachmentRetryKey);
+                await notifyDeliveryFailure(
+                  entry,
+                  `file "${attachment.filename}"`,
+                  downloadFailed ? 'không tải được file từ Rocket.Chat' : failure.reason
+                );
               } else {
                 messageRetryCounts.set(attachmentRetryKey, retries);
                 attachmentFailed = true;
               }
               try {
-                await telegram.sendMessage(entry.platformUserId, MESSAGES.telegram.mediaDeliveryFailed);
+                await sendReplyToPlatform(entry.platform, entry.platformUserId, mediaDeliveryFailedMessage(entry.platform));
               } catch (noticeErr) {
                 console.error('[poll] Failed to send attachment error notice:', noticeErr.message);
               }
@@ -506,6 +734,7 @@ async function pollAgentMessages() {
           }
           if (attachmentFailed) {
             completedAttachmentKeys.set(retryKey, completed);
+            deliveryPending = true;
             continue;
           }
           completedAttachmentKeys.delete(retryKey);
@@ -525,8 +754,8 @@ async function pollAgentMessages() {
 
         try {
           if (entry.platform === 'facebook') {
-            // Facebook has no date entity: send timestamps as readable text.
-            await facebook.sendMessage(entry.platformUserId, rcTimestampsToPlainText(text, { timeZone: ENV.timezone }));
+            // Messenger has no formatting or date entity: plain text, split at 2000.
+            await facebook.sendAgentMessage(entry.platformUserId, text, { timeZone: ENV.timezone });
           } else if (entry.platform === 'telegram') {
             // Agent text only: render Rocket.Chat Markdown (bold/italic/strike/code).
             await telegram.sendMessage(entry.platformUserId, text, { markdown: true });
@@ -535,20 +764,34 @@ async function pollAgentMessages() {
           markMessageProcessed(entry, messageId, ts);
         } catch (err) {
           console.error(`[poll] Failed to forward message ${msg._id} to ${entry.platform}:`, err.message);
+          const failure = classifyDeliveryError(entry.platform, err);
+          if (failure.kind === 'auth') console.error(`[ALERT] ${entry.platform} credentials rejected: ${failure.reason}`);
           const retries = (messageRetryCounts.get(retryKey) || 0) + 1;
           messageRetryCounts.set(retryKey, retries);
-          if (retries >= ENV.rocketChatMaxMessageRetries) {
-            console.error(`[poll] Giving up on message ${msg._id} after ${retries} attempts.`);
+          // Retrying cannot fix a blocked customer or a closed 24 h window.
+          if (failure.kind === 'permanent' || retries >= ENV.rocketChatMaxMessageRetries) {
+            console.error(`[poll] Giving up on message ${msg._id} (${failure.kind}) after ${retries} attempt(s).`);
             messageRetryCounts.delete(retryKey);
             markMessageProcessed(entry, messageId, ts);
+            await notifyDeliveryFailure(entry, 'tin nhắn', failure.reason);
           } else {
+            deliveryPending = true;
             break;
           }
         }
       }
+
+      // The agent closed the conversation and everything was delivered: stop
+      // polling this room; the customer's next message opens a fresh one.
+      if (newMessages.closed && !deliveryPending) {
+        mapping.update(entry, { roomId: null, ...rocketchat.roomStateReset() });
+        console.log(`[poll] Conversation closed by the agent for ${entry.platform}:${entry.platformUserId}.`);
+      }
     } catch (err) {
       console.error(`[poll] Error polling room ${entry.roomId}:`, err.message);
       if (err.status === 429) {
+        // The room was refused, not served: keep it first in line for next time.
+        pollScheduler.release(entry);
         const retryAfterSeconds = Number(
           String(err.body && err.body.error || err.message).match(/wait\s+(\d+)\s+seconds?/i)?.[1]
         );
@@ -621,11 +864,29 @@ async function start() {
   }
 
 
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`[startup] Bridge server listening on port ${PORT}`);
+    if (!ENV.facebookAppSecret) {
+      console.warn('[startup] FB_APP_SECRET is not set; Facebook webhook signatures are NOT verified.');
+    }
     console.log(`[startup] Facebook webhook:  http://localhost:${PORT}/webhook/facebook`);
     console.log(`[startup] Telegram webhook:  http://localhost:${PORT}/webhook/telegram`);
   });
+
+  // Let queued Facebook work finish before exiting so acknowledged messages
+  // are not lost on a normal stop or restart.
+  let shuttingDown = false;
+  const shutdown = async (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[shutdown] ${signal} received; draining ${facebookQueue.size()} queued task(s).`);
+    server.close();
+    const drained = await facebookQueue.idle(10000);
+    if (!drained) console.warn('[shutdown] Timed out; some queued tasks were dropped.');
+    process.exit(0);
+  };
+  process.once('SIGINT', () => shutdown('SIGINT'));
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
 }
 
 if (require.main === module) start();
@@ -644,4 +905,4 @@ function authorizeAdmin(req) {
   return null;
 }
 
-module.exports = { app, authorizeAdmin, start };
+module.exports = { app, authorizeAdmin, facebookQueue, forwardToRocketChat, isAiPaused, start };

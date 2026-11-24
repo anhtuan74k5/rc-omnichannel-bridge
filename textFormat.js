@@ -339,7 +339,85 @@ function telegramToRcText(text) {
   return String(text || '').normalize('NFC');
 }
 
+function unescapeHtml(text) {
+  return text
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&');
+}
+
+/** Telegram-subset HTML (as produced above) -> plain text. */
+function telegramHtmlToPlain(html) {
+  const plain = html
+    .replace(/<a href="([^"]*)">([\s\S]*?)<\/a>/g, (match, url, label) => {
+      const text = label.replace(/<[^>]+>/g, '');
+      return unescapeHtml(text) === unescapeHtml(url) ? text : `${text} (${url})`;
+    })
+    .replace(/<tg-time[^>]*>([\s\S]*?)<\/tg-time>/g, '$1')
+    .replace(/<\/?(?:b|i|s|code|pre)(?:\s[^>]*)?>/g, '');
+  return unescapeHtml(plain);
+}
+
+/**
+ * Rocket.Chat Markdown -> readable plain text for channels without formatting
+ * (Facebook Messenger): markers are dropped, code keeps its content, links keep
+ * their URL, timestamps become dates, shortcodes become emoji. Reuses the same
+ * parser as the Telegram path, so snake_case, `2 * 3 * 4` and URLs stay intact.
+ */
+function rcMarkdownToPlainText(source, { timeOptions } = {}) {
+  const converted = convertOutsideCode(source, replaceShortcodes);
+  let html = rcMarkdownToTelegramHtml(converted, { timeOptions });
+  if (!isWellFormedTelegramHtml(html)) html = rcMarkdownToTelegramHtml(converted, { emphasis: false, timeOptions });
+  if (!isWellFormedTelegramHtml(html)) return rcTimestampsToPlainText(converted, timeOptions);
+  return telegramHtmlToPlain(html);
+}
+
+/**
+ * Split for channels that count UTF-16 code units (Messenger: 2000). The
+ * grapheme-based splitter can exceed that for emoji-heavy text, so retry with a
+ * smaller grapheme limit until every part fits.
+ */
+function splitByUtf16(text, maxUnits) {
+  const graphemes = segmentGraphemes(String(text || ''));
+  const chunks = [];
+  let start = 0;
+
+  while (start < graphemes.length) {
+    let end = start;
+    let units = 0;
+    while (end < graphemes.length && units + graphemes[end].length <= maxUnits) {
+      units += graphemes[end].length;
+      end += 1;
+    }
+    if (end === graphemes.length) {
+      chunks.push(graphemes.slice(start).join(''));
+      break;
+    }
+    if (end === start) end = start + 1; // a single grapheme longer than the limit
+
+    // Prefer a line break, then a space, as long as it is not near the start.
+    const window = graphemes.slice(start, end);
+    const lineBreak = window.lastIndexOf('\n');
+    const space = window.lastIndexOf(' ');
+    const minimum = Math.floor(window.length * 0.4);
+    let cut = end;
+    if (lineBreak >= minimum) cut = start + lineBreak + 1;
+    else if (space >= minimum) cut = start + space + 1;
+    else if (lineBreak > 0) cut = start + lineBreak + 1;
+    else if (space > 0) cut = start + space + 1;
+
+    chunks.push(graphemes.slice(start, cut).join('').trimEnd());
+    start = cut;
+    while (start < graphemes.length && (graphemes[start] === '\n' || graphemes[start] === ' ')) start += 1;
+  }
+
+  return chunks.filter(Boolean);
+}
+
 module.exports = {
+  rcMarkdownToPlainText,
+  splitByUtf16,
   buildTelegramMessages,
   isWellFormedTelegramHtml,
   formatTimestampText,
