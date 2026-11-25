@@ -28,6 +28,8 @@ function write(method, args) {
 }
 
 const log = {
+  // Routine noise (read receipts and the like): shown only with LOG_LEVEL=debug.
+  debug: (...args) => { if (process.env.LOG_LEVEL === 'debug') write('log', args); },
   info: (...args) => write('log', args),
   warn: (...args) => write('warn', args),
   error: (...args) => write('error', args),

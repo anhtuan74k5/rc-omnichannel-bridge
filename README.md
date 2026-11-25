@@ -287,6 +287,7 @@ guessing. Documents are matched by keywords, not by meaning.
 | `CONVERSATION_CLOSED_NOTICE` | `true` | Tell the customer when an agent ends the chat |
 | `CONVERSATION_CLOSED_MESSAGE` | see `src/constants/messages.js` | Custom text for that notice |
 | `MAPPING_FILE` | `./mapping.json` | Where the visitor/room mapping is stored |
+| `LOG_LEVEL` | empty | `debug` also logs routine events (Messenger read receipts, delivery reports, echoes) |
 | `DEBUG_POLLING` | `false` | Log polling requests |
 | `DEBUG_DUMP_PAYLOADS` | `false` | Write selected raw payloads to `debug-dumps/` |
 | `TZ` | `Asia/Bangkok` | Process time zone (same offset as Vietnam) |
@@ -294,8 +295,14 @@ guessing. Documents are matched by keywords, not by meaning.
 ### Startup checks and the mock server
 
 On start the bridge calls Facebook `/me` and `debug_token`, and Telegram `getMe`. It
-logs `Token OK`, or a warning such as `Token check FAILED`, or `Token expires soon`
-when less than 7 days are left. A failed check only warns; it never stops the bridge.
+logs `Token OK`, or a warning: `Token check FAILED`, `Token expires soon`, or
+`Data access window ends soon`. The last two appear when less than 7 days are left.
+A failed check only warns; it never stops the bridge.
+
+A Page Access Token made from a long-lived user token never expires (`expires: never`).
+Meta still limits *data access* to 90 days after a Page admin last used or granted the
+app (`dataAccessUntil` in the log). Before that date, regenerate the Page token.
+Telegram bot tokens do not expire.
 
 `FB_GRAPH_BASE_URL` and `TELEGRAM_API_BASE_URL` (optional) change the Graph and Bot
 API origins, so a test bridge can talk to the included mock instead:
@@ -309,7 +316,8 @@ The mock injects faults through `POST /__fault`, for example
 
 - Facebook: `fb-190`, `fb-551`, `fb-10`, `fb-2018278`, `fb-100`, `fb-rate`.
 - Telegram: `tg-401`, `tg-403`, `tg-400-chat`, `tg-400-parse`.
-- Both: `http-429`, `http-500`, `http-503`, `timeout`, `ok-token-expiring`.
+- Both: `http-429`, `http-500`, `http-503`, `timeout`.
+- Token checks: `ok-token-expiring`, `ok-data-access-expiring`.
 
 Use the mock only with a test bridge (its own port and `.env`), never with the real one.
 
@@ -362,8 +370,8 @@ URL never changes. Examples are an ngrok static domain or Cloudflare Tunnel:
 ngrok http --url=<your-name>.ngrok-free.app 3001
 ```
 
-Replace `3001` with the bridge's `PORT`. A step-by-step guide for tokens, the App
-Secret and ngrok is in [guide.md](guide.md) (Vietnamese).
+Replace `3001` with the bridge's `PORT`. `npm run fb:check` checks the Facebook
+settings in `.env` without printing any secret.
 
 > While the Meta app is in **Development** mode, only people with a role on the app
 > can message the Page. Public use needs App Review for `pages_messaging`.
@@ -642,7 +650,6 @@ scripts/
   smoke.md                  Manual test checklist
 test/                       node:test suites
 docs/                       Test results, lint baseline
-guide.md                    Setup guide for tokens, ngrok and webhooks (Vietnamese)
 ```
 
 At run time the bridge keeps `mapping.json` (plus `mapping.json.tgoffset`) and

@@ -13,7 +13,8 @@
  *   GET  /__requests          requests received so far (no tokens, no bodies)
  * Fault names: fb-190, fb-551, fb-10, fb-2018278, fb-100, fb-rate (code 4),
  *   http-429, http-500, http-503, tg-401, tg-403, tg-400-chat, tg-400-parse,
- *   timeout (never answers), ok-token-expiring (debug_token expires in 1 h).
+ *   timeout (never answers), ok-token-expiring (debug_token expires in 1 h),
+ *   ok-data-access-expiring (data access window ends in 1 h).
  */
 
 const http = require('http');
@@ -37,7 +38,7 @@ const FAULTS = {
   'tg-400-chat': () => [400, { ok: false, error_code: 400, description: 'Bad Request: chat not found' }],
   'tg-400-parse': () => [400, { ok: false, error_code: 400, description: "Bad Request: can't parse entities" }],
 };
-const SPECIAL = ['timeout', 'ok-token-expiring'];
+const SPECIAL = ['timeout', 'ok-token-expiring', 'ok-data-access-expiring'];
 
 function createMock() {
   const queues = { facebook: [], telegram: [] };
@@ -114,8 +115,13 @@ function createMock() {
       }
       if (route.startsWith('me')) return reply(res, 200, { id: '1234567890', name: 'Mock Page' });
       if (route.startsWith('debug_token')) {
-        const soon = Math.floor(Date.now() / 1000) + 3600;
-        return reply(res, 200, { data: { type: 'PAGE', is_valid: true, expires_at: fault === 'ok-token-expiring' ? soon : 0 } });
+        const now = Math.floor(Date.now() / 1000);
+        return reply(res, 200, { data: {
+          type: 'PAGE',
+          is_valid: true,
+          expires_at: fault === 'ok-token-expiring' ? now + 3600 : 0,
+          data_access_expires_at: fault === 'ok-data-access-expiring' ? now + 3600 : now + 80 * 86400,
+        } });
       }
       return reply(res, 404, { error: { message: 'Unknown path', code: 803 } });
     }

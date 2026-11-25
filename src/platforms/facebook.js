@@ -91,6 +91,8 @@ function handleVerify(req, res) {
  * @param {function} [onAttachment] - async (psid, attachment, {mid, key}) => void,
  *   once per attachment ({type, payload: {url, ...}, title?})
  */
+const ROUTINE_EVENTS = ['read', 'delivery', 'reaction'];
+
 async function handleWebhook(body, onMessage, onAttachment) {
   if (!body || body.object !== 'page') {
     log.warn('[facebook] Ignoring non-page webhook event.');
@@ -107,7 +109,15 @@ async function handleWebhook(body, onMessage, onAttachment) {
         continue;
       }
       if (!message || message.is_echo) {
-        log.info('[facebook] Received non-message event', { psid, type: 'ignored', length: 0 });
+        // Meta sends read receipts, delivery reports and echoes for every message;
+        // they need no action, so they only show up with LOG_LEVEL=debug.
+        const kind = message ? 'echo' : ROUTINE_EVENTS.find((name) => event[name]);
+        if (kind) {
+          log.debug('[facebook] Ignored routine event', { psid, kind });
+        } else {
+          const fields = Object.keys(event).filter((k) => !['sender', 'recipient', 'timestamp'].includes(k));
+          log.info('[facebook] Ignored unsupported event', { psid, fields: fields.join(',') || 'none' });
+        }
         continue;
       }
 
@@ -276,6 +286,9 @@ async function checkToken() {
       return { ok: false, status: code === 190 ? 'invalid' : 'error', code };
     }
     let expiresAt = 0;
+    // Separate from expiry: Meta's data access window (90 days after the Page admin last
+    // used or granted the app). Graph calls may be refused after it, so warn in advance.
+    let dataAccessExpiresAt = 0;
     try {
       const dbgRes = await fetchWithTimeout(
         `${GRAPH_URL()}/debug_token?input_token=${encodeURIComponent(ENV.facebookPageAccessToken)}`,
@@ -283,18 +296,29 @@ async function checkToken() {
       );
       const dbg = (await dbgRes.json()).data || {};
       expiresAt = Number(dbg.expires_at) || 0;
+      dataAccessExpiresAt = Number(dbg.data_access_expires_at) || 0;
     } catch (error) {
       log.warn('[facebook] debug_token unavailable; expiry unknown.', { error: error.message });
     }
-    if (expiresAt > 0) {
-      const remaining = expiresAt * 1000 - Date.now();
-      if (remaining < TOKEN_EXPIRY_WARN_MS) {
-        log.warn('[facebook] Token expires soon; create a new token.', { expiresAt: new Date(expiresAt * 1000).toISOString() });
-        return { ok: true, status: 'expiring', pageId: me.id, expiresAt };
-      }
+    const iso = (seconds) => new Date(seconds * 1000).toISOString();
+    const soon = (seconds) => seconds > 0 && seconds * 1000 - Date.now() < TOKEN_EXPIRY_WARN_MS;
+    if (soon(expiresAt)) {
+      log.warn('[facebook] Token expires soon; create a new token.', { expiresAt: iso(expiresAt) });
+      return { ok: true, status: 'expiring', pageId: me.id, expiresAt, dataAccessExpiresAt };
     }
-    log.info('[facebook] Token OK', { page: me.name, pageId: me.id, expires: expiresAt ? new Date(expiresAt * 1000).toISOString() : 'never' });
-    return { ok: true, status: 'ok', pageId: me.id, expiresAt };
+    if (soon(dataAccessExpiresAt)) {
+      log.warn('[facebook] Data access window ends soon; regenerate the Page token (a Page admin grants the app again).', {
+        dataAccessExpiresAt: iso(dataAccessExpiresAt),
+      });
+      return { ok: true, status: 'data-access-expiring', pageId: me.id, expiresAt, dataAccessExpiresAt };
+    }
+    log.info('[facebook] Token OK', {
+      page: me.name,
+      pageId: me.id,
+      expires: expiresAt ? iso(expiresAt) : 'never',
+      dataAccessUntil: dataAccessExpiresAt ? iso(dataAccessExpiresAt) : 'unknown',
+    });
+    return { ok: true, status: 'ok', pageId: me.id, expiresAt, dataAccessExpiresAt };
   } catch (error) {
     log.warn('[facebook] Token check could not reach Graph API.', { error: error.message });
     return { ok: false, status: 'unreachable' };

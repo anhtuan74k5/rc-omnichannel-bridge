@@ -109,6 +109,44 @@ test('facebook checkToken: ok, invalid, expiring, unreachable never throw', asyn
   assert.equal((await facebook.checkToken()).status, 'unreachable');
 });
 
+test('facebook checkToken warns before Meta data access ends, even for a never-expiring token', async () => {
+  mock.clear();
+  const ok = await facebook.checkToken();
+  assert.equal(ok.status, 'ok');
+  assert.ok(ok.dataAccessExpiresAt > 0, 'data access date is read');
+
+  mock.clear();
+  mock.inject('facebook', 'ok-data-access-expiring', 0);
+  const soon = await facebook.checkToken();
+  assert.equal(soon.status, 'data-access-expiring');
+  assert.equal(soon.expiresAt, 0, 'the token itself never expires');
+  mock.clear();
+});
+
+test('Messenger read receipts and delivery reports are not logged at the normal level', async () => {
+  const lines = [];
+  const original = console.log;
+  console.log = (...args) => lines.push(args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '));
+  try {
+    delete process.env.LOG_LEVEL;
+    await facebook.handleWebhook({
+      object: 'page',
+      entry: [{ messaging: [
+        { sender: { id: 'P1' }, recipient: { id: 'PAGE' }, read: { watermark: 1 } },
+        { sender: { id: 'P1' }, recipient: { id: 'PAGE' }, delivery: { watermark: 1 } },
+        { sender: { id: 'P1' }, recipient: { id: 'PAGE' }, message: { mid: 'm1', is_echo: true, text: 'x' } },
+        { sender: { id: 'P1' }, recipient: { id: 'PAGE' }, postback: { payload: 'GET_STARTED' } },
+      ] }],
+    }, async () => {});
+  } finally {
+    console.log = original;
+  }
+  assert.equal(lines.filter((l) => l.includes('routine')).length, 0, 'receipts and echoes stay quiet');
+  const unsupported = lines.filter((l) => l.includes('unsupported event'));
+  assert.equal(unsupported.length, 1, 'an unknown event type is still visible');
+  assert.match(unsupported[0], /postback/);
+});
+
 test('telegram checkToken: ok, invalid, unreachable never throw', async () => {
   const ok = await telegram.checkToken();
   assert.equal(ok.status, 'ok');
