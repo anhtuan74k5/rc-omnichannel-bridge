@@ -288,7 +288,7 @@ Lưu ý:
   **Reset**, rồi chạy lại `ngrok config add-authtoken`.
 - Không bao giờ dán các giá trị này vào chat, issue, ảnh chụp màn hình hay commit.
 
-## 12. Chỉ số vận hành, tên khách và giới hạn
+## 13. Chỉ số vận hành, tên khách và giới hạn
 
 - `GET /health` (qua ngrok hoặc `localhost:3001`) hiện số phòng, độ sâu hàng đợi
   Facebook, lần poll cuối, số lần bị 429 và số tin bị giới hạn tốc độ. Nếu
