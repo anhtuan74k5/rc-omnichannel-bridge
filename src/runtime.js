@@ -31,6 +31,7 @@ const rcWebhook = createRocketChatWebhook({
   // Required lazily: outbound/deliverAgentMessages itself depends on this module.
   deliver: (entry, messages, closed) =>
     require('./outbound/deliverAgentMessages').deliverAgentMessages(entry, messages, closed),
+  onUrgent: (entry) => pollScheduler.prioritize(entry),
   onError: (err) => console.error('[rc-webhook] Failed to process event:', err.message),
 });
 

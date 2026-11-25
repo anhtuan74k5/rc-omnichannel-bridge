@@ -75,6 +75,9 @@ function createRocketChatWebhook({
   now = Date.now,
   findEntry,
   deliver,
+  // Called with the entry whose room must be polled next (closed, or a push failed),
+  // so it does not wait its turn behind every other open room.
+  onUrgent = () => {},
   onError = () => {},
 } = {}) {
   let lastEventAt = 0;
@@ -110,9 +113,13 @@ function createRocketChatWebhook({
       const result = await deliver(entry, event.messages, false);
       stats.delivered += event.messages.length;
       // A failed push is retried by polling on its next tick.
-      if (result && result.pending) forcePoll = true;
+      if (result && result.pending) {
+        onUrgent(entry);
+        forcePoll = true;
+      }
     } else if (event.kind === 'closed') {
       // Let polling close the room: it also sees messages still waiting for a retry.
+      onUrgent(entry);
       forcePoll = true;
     }
   }

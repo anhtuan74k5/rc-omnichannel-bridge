@@ -163,6 +163,23 @@ test('a failed push makes polling retry at once; close is left to polling', asyn
   assert.equal(hook.shouldPoll(), true, 'closing is handled by polling');
 });
 
+test('close and failed push mark that room urgent so it is polled next, not in turn', async () => {
+  const urgent = [];
+  const hook = createRocketChatWebhook({
+    secret: 's', now: () => 1_000_000,
+    findEntry: (event) => ({ id: event.roomId }),
+    deliver: async () => ({ pending: true }),
+    onUrgent: (entry) => urgent.push(entry.id),
+  });
+  const req = (body) => ({ get: () => 's', body });
+
+  hook.handler(req({ type: 'LivechatSession', _id: 'room-closed', closedAt: 'x' }), fakeRes());
+  hook.handler(req(agentMessagePayload({ _id: 'room-pending' })), fakeRes());
+  hook.handler(req({ type: 'LivechatSession', _id: 'room-open' }), fakeRes()); // not a close
+  await delay(10);
+  assert.deepEqual(urgent.sort(), ['room-closed', 'room-pending']);
+});
+
 test('polling slows down while the webhook is alive and recovers when it goes silent', () => {
   let time = 10_000_000;
   const hook = createRocketChatWebhook({

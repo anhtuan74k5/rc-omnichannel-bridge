@@ -69,6 +69,37 @@ test('a room refused with 429 stays first in line for the next tick', () => {
   assert.equal(second.platformUserId, first.platformUserId);
 });
 
+test('an urgent room (closed by the agent) jumps the line once', () => {
+  let time = 2_000_000;
+  const scheduler = createPollScheduler({ now: () => time, hotWindowMs: 10 * 60 * 1000 });
+  const rooms = Array.from({ length: 6 }, (_, i) => entry(`r${i}`, { lastInboundAt: time }));
+  for (const room of rooms.slice(0, 5)) scheduler.markPolled(room); // r5 is the most overdue
+  time += 10000;
+  scheduler.markPolled(rooms[2]); // r2 was just polled
+
+  scheduler.prioritize(rooms[2]);
+  const [first] = scheduler.select(rooms, 1);
+  assert.equal(first.platformUserId, 'r2', 'urgent room is chosen even though it was just polled');
+  scheduler.markPolled(first);
+  time += 10000;
+
+  const [next] = scheduler.select(rooms, 1);
+  assert.notEqual(next.platformUserId, 'r2', 'urgency is used up after one poll');
+});
+
+test('an urgent room refused with 429 stays urgent', () => {
+  const time = 3_000_000;
+  const scheduler = createPollScheduler({ now: () => time, hotWindowMs: 0 });
+  const rooms = [entry('a'), entry('b'), entry('c')];
+  scheduler.markPolled(rooms[1]);
+  scheduler.prioritize(rooms[1]);
+  const [picked] = scheduler.select(rooms, 1);
+  assert.equal(picked.platformUserId, 'b');
+  scheduler.markPolled(picked);
+  scheduler.release(picked);
+  assert.equal(scheduler.select(rooms, 1)[0].platformUserId, 'b');
+});
+
 test('keyed queue keeps order per key and runs different keys in parallel', async () => {
   const queue = createKeyedQueue();
   const order = [];

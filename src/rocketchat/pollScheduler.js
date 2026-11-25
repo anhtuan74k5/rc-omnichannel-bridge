@@ -20,6 +20,8 @@
 function createPollScheduler({ now = Date.now, hotWindowMs = 10 * 60 * 1000, hotWeight = 2 } = {}) {
   const lastPolled = new Map();
   const previous = new Map();
+  // Rooms that must be polled on the very next tick (closed or failed push seen by the webhook).
+  const urgent = new Set();
 
   const keyOf = (entry) => `${entry.platform}:${entry.platformUserId}`;
 
@@ -32,33 +34,47 @@ function createPollScheduler({ now = Date.now, hotWindowMs = 10 * 60 * 1000, hot
   function select(entries, limit) {
     const time = now();
     const count = Math.max(1, Math.floor(limit));
+    // Forget urgency for rooms that are no longer active (closed elsewhere, customer gone).
+    if (urgent.size > 0) {
+      const active = new Set(entries.map(keyOf));
+      for (const key of urgent) if (!active.has(key)) urgent.delete(key);
+    }
     return entries
       .map((entry, index) => {
         const elapsed = time - (lastPolled.get(keyOf(entry)) || 0);
-        return { entry, index, priority: elapsed * (isHot(entry, time) ? hotWeight : 1) };
+        const priority = urgent.has(keyOf(entry))
+          ? Infinity
+          : elapsed * (isHot(entry, time) ? hotWeight : 1);
+        return { entry, index, priority };
       })
-      .sort((a, b) => b.priority - a.priority || a.index - b.index)
+      .sort((a, b) => (b.priority - a.priority) || a.index - b.index)
       .slice(0, count)
       .map((item) => item.entry);
   }
 
   function markPolled(entry) {
     const key = keyOf(entry);
-    previous.set(key, lastPolled.get(key));
+    previous.set(key, { at: lastPolled.get(key), urgent: urgent.delete(key) });
     lastPolled.set(key, now());
+  }
+
+  /** Poll this room before any other on the next tick. */
+  function prioritize(entry) {
+    urgent.add(keyOf(entry));
   }
 
   /** Undo markPolled: the request was refused (429), so the room was not served. */
   function release(entry) {
     const key = keyOf(entry);
     if (!previous.has(key)) return;
-    const before = previous.get(key);
+    const { at: before, urgent: wasUrgent } = previous.get(key);
+    if (wasUrgent) urgent.add(key);
     if (before === undefined) lastPolled.delete(key);
     else lastPolled.set(key, before);
     previous.delete(key);
   }
 
-  return { select, markPolled, release, isHot: (entry) => isHot(entry, now()) };
+  return { select, markPolled, release, prioritize, isHot: (entry) => isHot(entry, now()) };
 }
 
 /** How many rooms may be polled per tick without exceeding the call budget. */
