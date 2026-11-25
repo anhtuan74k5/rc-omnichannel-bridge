@@ -1,0 +1,24 @@
+# Keep secrets, local state and dev files out of the image.
+.env
+.env.*
+!.env.example
+node_modules
+npm-debug.log*
+mapping.json
+mapping.json.*
+*.tgoffset
+data
+debug-dumps
+.git
+.github
+.claude
+.vscode
+test
+docs
+floorplan
+PLAN.md
+CODEBASE_AUDIT_REPORT.md
+*.md
+Dockerfile
+docker-compose*.yml
+deploy

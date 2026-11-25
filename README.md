@@ -71,6 +71,73 @@ Rocket.Chat URL vẫn phải trỏ tới server Rocket.Chat, ví dụ:
 ROCKETCHAT_URL=http://localhost:3000
 ```
 
+## Chạy cả hệ thống bằng Docker Compose
+
+`docker-compose.yml` dựng toàn bộ: MongoDB (replica set), NATS, Rocket.Chat 8.9.0,
+bridge, và Caddy (HTTPS, chỉ khi lên VPS). Một lệnh là chạy, không cần cài Node hay
+cấu hình Rocket.Chat bằng tay.
+
+```text
+             Internet (Meta, Telegram)          Agent (trình duyệt)
+                        │ https                         │ https
+                 ┌──────▼─────────────────────────────▼──────┐
+                 │ caddy  (chỉ profile "proxy", trên VPS)     │
+                 │  /webhook/facebook, /webhook/telegram → bridge
+                 │  còn lại → rocketchat                      │
+                 └──────┬─────────────────────────────┬──────┘
+                        │                             │
+                 ┌──────▼──────┐  REST /api/v1/livechat  ┌──────▼──────┐
+                 │   bridge    │ ───────────────────────► │ rocketchat  │──► mongodb, nats
+                 │   :3001     │ ◄─────────────────────── │   :3000     │
+                 └─────────────┘  webhook nội bộ          └─────────────┘
+                   volume bridge_data                        volume mongodb_data
+                   (mapping.json, offset Telegram, tài liệu)
+```
+
+### Trên máy cá nhân
+
+1. Điền `.env` như phần cấu hình bên dưới, thêm mục **Docker Compose** ở cuối `.env.example`.
+   Tối thiểu: `RC_ADMIN_PASSWORD`, `ROCKETCHAT_AGENT_USERNAME`, `ROCKETCHAT_AGENT_PASSWORD`,
+   `ROCKETCHAT_WEBHOOK_SECRET` và token của Facebook/Telegram.
+2. Chạy:
+
+   ```powershell
+   docker compose up -d --build
+   docker compose ps          # bridge "healthy", rc-setup "Exited (0)"
+   docker compose logs -f bridge
+   ```
+
+3. Mở `http://localhost:3000`, đăng nhập bằng tài khoản agent, bật trạng thái **Available**.
+   Messenger vẫn cần ngrok trỏ vào cổng 3001 khi chạy trên máy cá nhân; Telegram polling thì không.
+
+Dịch vụ `rc-setup` chạy một lần trước bridge (và mỗi lần `up`, nếu đã đúng thì không đổi gì):
+đăng nhập admin, bật Omnichannel, tạo tài khoản agent cho bridge (đồng bộ mật khẩu theo `.env`)
+và trỏ webhook Omnichannel tới `http://bridge:3001/webhook/rocketchat`. Rocket.Chat và bridge
+nói chuyện qua mạng nội bộ của Docker, không cần `host.docker.internal` hay ngrok cho đoạn này.
+
+Lưu ý: Rocket.Chat từ chối mở phòng mới khi **không có agent nào online**
+(`no-agent-online`); bridge khi đó báo lại cho khách. Hãy để ít nhất một agent đăng nhập.
+
+### Trên VPS (thay máy cá nhân và ngrok)
+
+1. VPS Ubuntu, 2 vCPU / 4 GB RAM, cài Docker. Trỏ tên miền (A record) về IP của VPS,
+   mở cổng 80 và 443.
+2. Trong `.env`: `PUBLIC_DOMAIN=chat.ten-mien-cua-ban.tech` và
+   `RC_ROOT_URL=https://chat.ten-mien-cua-ban.tech`.
+3. Chạy `docker compose --profile proxy up -d --build`. Caddy tự lấy chứng chỉ Let's Encrypt.
+4. Meta Developers → Messenger → Webhooks: đổi Callback URL thành
+   `https://<PUBLIC_DOMAIN>/webhook/facebook`, giữ nguyên Verify token.
+
+Ra ngoài Internet chỉ có webhook Facebook/Telegram và giao diện Rocket.Chat; `/health`,
+`/documents` và webhook Rocket.Chat chỉ dùng nội bộ (`curl http://127.0.0.1:3001/health` trên VPS).
+MongoDB và NATS không mở cổng nào ra ngoài; Rocket.Chat và bridge chỉ nghe trên `127.0.0.1`.
+
+### Dữ liệu, cập nhật, gỡ
+
+- Cập nhật code: `git pull` rồi `docker compose up -d --build`. Dữ liệu nằm trong volume nên không mất.
+- Sao lưu: `docker compose exec mongodb mongodump --archive > rc-backup.archive` và volume `bridge_data`.
+- `docker compose down` dừng hệ thống; `docker compose down -v` **xóa luôn dữ liệu**.
+
 ## Cấu hình môi trường
 
 ### Rocket.Chat
@@ -507,6 +574,10 @@ Kiểm tra giá trị `TELEGRAM_WEBHOOK_SECRET` trên bridge có trùng với se
 
 ```text
 index.js                  Điểm vào mỏng (npm start): nạp .env, chạy start(), re-export cho test
+Dockerfile                Image bridge (node:22-alpine, không chạy root, có HEALTHCHECK)
+docker-compose.yml        MongoDB + NATS + Rocket.Chat + rc-setup + bridge (+ caddy trên VPS)
+deploy/Caddyfile          HTTPS và định tuyến công khai cho VPS
+scripts/rc-bootstrap.js   rc-setup: chuẩn bị Rocket.Chat mới (Omnichannel, agent, webhook)
 src/
   app.js                 Express app, body parser, error handler
   server.js              start(): khởi động, vòng polling, tắt máy gọn
