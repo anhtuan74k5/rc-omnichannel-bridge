@@ -99,6 +99,9 @@ cấu hình Rocket.Chat bằng tay.
 1. Điền `.env` như phần cấu hình bên dưới, thêm mục **Docker Compose** ở cuối `.env.example`.
    Tối thiểu: `RC_ADMIN_PASSWORD`, `ROCKETCHAT_AGENT_USERNAME`, `ROCKETCHAT_AGENT_PASSWORD`,
    `ROCKETCHAT_WEBHOOK_SECRET` và token của Facebook/Telegram.
+   Với Docker, bridge **luôn** đăng nhập bằng `ROCKETCHAT_AGENT_USERNAME`/`PASSWORD` (do `rc-setup`
+   tạo); `ROCKETCHAT_AUTH_TOKEN`/`ROCKETCHAT_USER_ID` bị bỏ qua vì token của Rocket.Chat khác
+   không dùng được với Rocket.Chat mới trong stack.
 2. Chạy:
 
    ```powershell

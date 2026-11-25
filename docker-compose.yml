@@ -107,6 +107,11 @@ services:
       # The bridge never needs the admin account; blank what env_file brings in.
       RC_ADMIN_PASSWORD: ""
       RC_ADMIN_USERNAME: ""
+      # A Personal Access Token in .env belongs to another Rocket.Chat (e.g. the one used
+      # with `npm start`) and would win over the agent login; this stack's Rocket.Chat
+      # only knows the agent account rc-setup created.
+      ROCKETCHAT_AUTH_TOKEN: ""
+      ROCKETCHAT_USER_ID: ""
     volumes:
       - bridge_data:/app/data
     ports:
