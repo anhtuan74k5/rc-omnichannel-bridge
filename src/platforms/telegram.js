@@ -342,6 +342,9 @@ async function sendMediaPart(method, field, chatId, descriptor, caption, options
     limit: 1024,
   });
 
+  // Same shape as the Facebook media log, so a delivered file is visible in the log.
+  const size = descriptor && descriptor.buffer ? descriptor.buffer.length : undefined;
+  log.info('[telegram] Sending media', { chatId, type: field, size });
   let result;
   try {
     result = await sendTelegramMedia(method, field, chatId, descriptor, first ? first.text : '', first && first.parseMode);
@@ -350,6 +353,7 @@ async function sendMediaPart(method, field, chatId, descriptor, caption, options
     log.warn('[telegram] Caption formatting rejected by Telegram; resending as plain text', { chatId, error: error.description });
     result = await sendTelegramMedia(method, field, chatId, descriptor, first.source);
   }
+  log.info('[telegram] Media sent', { chatId, type: field });
   for (const remainder of remainders) {
     await sendTextPart(chatId, remainder);
   }
