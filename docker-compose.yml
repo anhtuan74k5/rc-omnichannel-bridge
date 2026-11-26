@@ -1,0 +1,168 @@
+# Whole stack: MongoDB (replica set) + NATS + Rocket.Chat + bridge, optional Caddy (HTTPS).
+#
+#   Local:  docker compose up -d --build
+#   VPS:    docker compose --profile proxy up -d --build      (adds Caddy on 80/443)
+# rc-setup prepares Rocket.Chat (Omnichannel, agent account, webhook) before the bridge starts.
+#
+# Every value comes from .env (see .env.example, section "Docker Compose").
+# Nothing secret is written in this file.
+name: ${COMPOSE_PROJECT_NAME:-rc-omnichannel}
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
+services:
+  mongodb:
+    image: docker.io/mongodb/mongodb-community-server:${MONGODB_VERSION:-8.0-ubi8}
+    restart: unless-stopped
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    volumes:
+      - mongodb_data:/data/db
+    # Rocket.Chat 8.x needs a replica set even on one node. The healthcheck initiates it
+    # on first start and is healthy only once this node is the writable primary.
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - "try { rs.status() } catch (e) { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongodb:27017' }] }); quit(1) } quit(db.hello().isWritablePrimary ? 0 : 1)"
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+    logging: *logging
+
+  nats:
+    image: docker.io/nats:${NATS_VERSION:-2.11-alpine}
+    restart: unless-stopped
+    command: ["--http_port", "8222"]
+    logging: *logging
+
+  rocketchat:
+    image: registry.rocket.chat/rocketchat/rocket.chat:${RC_RELEASE:-8.9.0}
+    restart: unless-stopped
+    depends_on:
+      mongodb: { condition: service_healthy }
+      nats: { condition: service_started }
+    environment:
+      # Public address of Rocket.Chat. On a VPS with the proxy: https://<PUBLIC_DOMAIN>.
+      ROOT_URL: ${RC_ROOT_URL:-http://localhost:3000}
+      PORT: 3000
+      DEPLOY_METHOD: docker
+      DEPLOY_PLATFORM: compose
+      MONGO_URL: mongodb://mongodb:27017/rocketchat?replicaSet=rs0
+      TRANSPORTER: monolith+nats://nats:4222
+      # First start only: create the admin account and skip the setup wizard.
+      ADMIN_USERNAME: ${RC_ADMIN_USERNAME:-admin}
+      ADMIN_PASS: ${RC_ADMIN_PASSWORD:?Set RC_ADMIN_PASSWORD in .env}
+      ADMIN_EMAIL: ${RC_ADMIN_EMAIL:-admin@example.com}
+      INITIAL_USER: "yes"
+      OVERWRITE_SETTING_Show_Setup_Wizard: completed
+    ports:
+      - "${RC_BIND_IP:-127.0.0.1}:${RC_HOST_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/info').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      start_period: 60s
+    logging: *logging
+
+  # One-shot: enables Omnichannel, creates the bridge's agent account and the webhook.
+  # Runs on every `up`, changes nothing when Rocket.Chat is already set up.
+  rc-setup:
+    # Same image as the bridge (built once, by the bridge service).
+    image: rc-omnichannel-bridge:local
+    pull_policy: never
+    restart: "no"
+    depends_on:
+      rocketchat: { condition: service_healthy }
+    command: ["node", "scripts/rc-bootstrap.js"]
+    environment:
+      ROCKETCHAT_URL: http://rocketchat:3000
+      RC_ADMIN_USERNAME: ${RC_ADMIN_USERNAME:-admin}
+      RC_ADMIN_PASSWORD: ${RC_ADMIN_PASSWORD:?Set RC_ADMIN_PASSWORD in .env}
+      ROCKETCHAT_AGENT_USERNAME: ${ROCKETCHAT_AGENT_USERNAME:?Set ROCKETCHAT_AGENT_USERNAME in .env}
+      ROCKETCHAT_AGENT_PASSWORD: ${ROCKETCHAT_AGENT_PASSWORD:?Set ROCKETCHAT_AGENT_PASSWORD in .env}
+      RC_AGENT_NAME: ${RC_AGENT_NAME:-}
+      RC_AGENT_EMAIL: ${RC_AGENT_EMAIL:-}
+      ROCKETCHAT_WEBHOOK_SECRET: ${ROCKETCHAT_WEBHOOK_SECRET:-}
+      RC_WEBHOOK_URL: http://bridge:3001/webhook/rocketchat
+    logging: *logging
+
+  bridge:
+    build: .
+    image: rc-omnichannel-bridge:local
+    restart: unless-stopped
+    depends_on:
+      rc-setup: { condition: service_completed_successfully }
+    env_file: ${BRIDGE_ENV_FILE:-.env}
+    # These override .env so the same file works for `npm start` and for Docker.
+    environment:
+      ROCKETCHAT_URL: http://rocketchat:3000
+      PORT: 3001
+      MAPPING_FILE: /app/data/mapping.json
+      # One row per customer in the data volume; an existing mapping.json is imported once.
+      MAPPING_STORE: ${MAPPING_STORE:-sqlite}
+      # The bridge never needs the admin account; blank what env_file brings in.
+      RC_ADMIN_PASSWORD: ""
+      RC_ADMIN_USERNAME: ""
+      # A Personal Access Token in .env belongs to another Rocket.Chat (e.g. the one used
+      # with `npm start`) and would win over the agent login; this stack's Rocket.Chat
+      # only knows the agent account rc-setup created.
+      ROCKETCHAT_AUTH_TOKEN: ""
+      ROCKETCHAT_USER_ID: ""
+    volumes:
+      - bridge_data:/app/data
+      # Files of the optional local Bot API server (empty without that profile).
+      - telegram_files:/var/lib/telegram-bot-api:ro
+    # The Bot API server writes its files as group 101.
+    group_add: ["101"]
+    ports:
+      - "${BRIDGE_BIND_IP:-127.0.0.1}:${BRIDGE_HOST_PORT:-3001}:3001"
+    logging: *logging
+
+  # Optional (--profile telegram-local): own Bot API server, for files above 20 MB.
+  # Needs TELEGRAM_API_ID / TELEGRAM_API_HASH from https://my.telegram.org and in .env:
+  #   TELEGRAM_API_BASE_URL=http://telegram-bot-api:8081
+  #   TELEGRAM_LOCAL_FILES_DIR=/var/lib/telegram-bot-api
+  # Community image of https://github.com/tdlib/telegram-bot-api; see the README first.
+  telegram-bot-api:
+    image: docker.io/aiogram/telegram-bot-api:${TELEGRAM_BOT_API_VERSION:-10.5}
+    profiles: ["telegram-local"]
+    restart: unless-stopped
+    environment:
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
+      TELEGRAM_LOCAL: "1"
+    volumes:
+      - telegram_files:/var/lib/telegram-bot-api
+    logging: *logging
+
+  # VPS only: HTTPS with an automatic Let's Encrypt certificate.
+  caddy:
+    image: docker.io/caddy:${CADDY_VERSION:-2.10-alpine}
+    profiles: ["proxy"]
+    restart: unless-stopped
+    depends_on: [rocketchat, bridge]
+    environment:
+      # Your domain, e.g. chat.example.tech. "localhost" = self-signed, for trying the proxy locally.
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging: *logging
+
+volumes:
+  mongodb_data:
+  bridge_data:
+  telegram_files:
+  caddy_data:
+  caddy_config:

@@ -5,7 +5,12 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "node --watch index.js"
+    "dev": "node --watch index.js",
+    "test": "node --test",
+    "test:e2e": "node scripts/e2e/compose-e2e.js",
+    "tg:set-webhook": "node src/platforms/telegram.js --set-webhook",
+    "fb:check": "node scripts/fb-check.js",
+    "lint": "eslint ."
   },
   "keywords": [
     "rocketchat",
@@ -16,10 +21,19 @@
     "bridge"
   ],
   "license": "MIT",
+  "engines": { "node": ">=22.13" },
   "dependencies": {
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "mammoth": "^1.12.2",
     "pdf-parse": "^2.4.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.15.0",
+    "globals": "^17.14.0"
+  },
+  "overrides": {
+    "qs": "^6.16.2"
   }
 }

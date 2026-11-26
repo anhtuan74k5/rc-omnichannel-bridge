@@ -1,0 +1,21 @@
+# Added on top of docker-compose.yml by compose-e2e.js: a mock of the messaging
+# platforms inside the Compose network, so the test never calls a real service.
+services:
+  mock:
+    image: docker.io/node:22-alpine
+    working_dir: /e2e
+    volumes:
+      - ./scripts/e2e:/e2e:ro
+    command:
+      - node
+      - -e
+      - "require('./mock-platforms').createMock().server.listen(4010, '0.0.0.0')"
+    ports:
+      - "127.0.0.1:${MOCK_HOST_PORT:-4310}:4010"
+
+  bridge:
+    environment:
+      FB_GRAPH_BASE_URL: http://mock:4010
+      TELEGRAM_API_BASE_URL: http://mock:4010
+      ZALO_API_BASE_URL: http://mock:4010
+      ZALO_MEDIA_HOSTS: http://mock:4010

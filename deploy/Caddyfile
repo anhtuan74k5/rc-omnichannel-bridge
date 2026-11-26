@@ -1,0 +1,23 @@
+# One public domain for the whole stack (docker compose --profile proxy).
+#   https://<PUBLIC_DOMAIN>/webhook/facebook, /telegram, /zalo -> bridge
+#   everything else                                          -> Rocket.Chat (agent UI)
+# /health, /documents and the Rocket.Chat webhook stay internal
+# (check health on the server: curl http://127.0.0.1:3001/health).
+{$PUBLIC_DOMAIN} {
+	encode zstd gzip
+
+	@bridge path /webhook/facebook /webhook/telegram /webhook/zalo
+	handle @bridge {
+		reverse_proxy bridge:3001
+	}
+
+	# Internal bridge routes (Rocket.Chat -> bridge webhook, health, document admin): never expose.
+	@internal path /webhook/rocketchat /health /documents /documents/* /metrics
+	handle @internal {
+		respond 404
+	}
+
+	handle {
+		reverse_proxy rocketchat:3000
+	}
+}

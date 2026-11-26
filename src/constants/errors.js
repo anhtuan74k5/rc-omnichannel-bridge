@@ -1,0 +1,60 @@
+const ERRORS = {
+  telegram: {
+    tokenMissing: 'TELEGRAM_BOT_TOKEN is missing',
+    updateFailed: (status, data) => `Telegram getUpdates failed (${status}): ${JSON.stringify(data)}`,
+    documentTooLarge: (maxBytes) => `Document is too large. Max size is ${maxBytes} bytes.`,
+    fileInfoFailed: (status, data) => `Telegram getFile failed (${status}): ${JSON.stringify(data)}`,
+    fileDownloadFailed: (status) => `Telegram file download failed (${status})`,
+    localFileNotConfigured: 'The Bot API server returned a local path; set TELEGRAM_LOCAL_FILES_DIR',
+    localFileOutside: 'The Bot API server returned a path outside TELEGRAM_LOCAL_FILES_DIR',
+    localFileUnreadable: (code) => `Could not read the file from the Bot API server folder (${code || 'unknown'})`,
+    sendFailed: (status, data) => `Telegram send failed (${status}): ${JSON.stringify(data)}`,
+    mediaInvalidBuffer: 'media buffer must be a non-empty Buffer',
+  },
+  facebook: {
+    sendFailed: (status, data) => `Facebook send failed (${status}): ${JSON.stringify(data)}`,
+    tokenMissing: 'FB_PAGE_ACCESS_TOKEN is missing',
+    mediaInvalidBuffer: 'media buffer must be a non-empty Buffer',
+    mediaUrlRejected: 'FACEBOOK_MEDIA_URL_REJECTED: attachment URL is not an allowed Facebook CDN host',
+    mediaTooLarge: (maxBytes) => `FACEBOOK_MEDIA_TOO_LARGE: file exceeds ${maxBytes} bytes`,
+    mediaDownloadFailed: (status) => `Facebook media download failed (${status})`,
+  },
+  zalo: {
+    sendFailed: (status, data) => `Zalo send failed (${status}): ${JSON.stringify(data)}`,
+    tokenMissing: 'ZALO_ACCESS_TOKEN is missing',
+    mediaInvalidBuffer: 'media buffer must be a non-empty Buffer',
+    mediaUnsupported: 'ZALO_MEDIA_UNSUPPORTED: only JPG, PNG, GIF, PDF and Word files can be sent',
+    mediaUrlRejected: 'ZALO_MEDIA_URL_REJECTED: attachment URL is not an allowed Zalo host',
+    mediaTooLarge: (maxBytes) => `ZALO_MEDIA_TOO_LARGE: file exceeds ${maxBytes} bytes`,
+    mediaDownloadFailed: (status) => `Zalo media download failed (${status})`,
+  },
+  rocketchat: {
+    api: (status, text) => `Rocket.Chat API error ${status}: ${text}`,
+    loginFailed: (status, body) => `Login failed (${status}): ${JSON.stringify(body)}`,
+    visitorFailed: (body) => `Failed to create visitor: ${JSON.stringify(body)}`,
+    roomFailed: (body) => `Failed to get room: ${JSON.stringify(body)}`,
+    messageFailed: (body) => `Failed to send message: ${JSON.stringify(body)}`,
+    uploadInvalidBuffer: 'buffer must be a non-empty Buffer',
+    uploadFailed: (status, text) => `Rocket.Chat livechat upload failed (${status}): ${text}`,
+    fileUrlRejected: 'ROCKETCHAT_FILE_URL_REJECTED: not a file on the configured Rocket.Chat',
+    fileUnauthorized: 'ROCKETCHAT_FILE_UNAUTHORIZED: Rocket.Chat file download was unauthorized',
+    fileForbidden: 'ROCKETCHAT_FILE_FORBIDDEN: Rocket.Chat file download was forbidden',
+    fileNotFound: 'ROCKETCHAT_FILE_NOT_FOUND: Rocket.Chat file was not found',
+    fileTooLarge: (maxBytes) => `ROCKETCHAT_FILE_TOO_LARGE: file exceeds ${maxBytes} bytes`,
+    fileContentLengthInvalid: 'ROCKETCHAT_FILE_CONTENT_LENGTH_INVALID: invalid Content-Length',
+    fileDownloadFailed: (status) => `ROCKETCHAT_FILE_DOWNLOAD_FAILED: Rocket.Chat file download failed (${status})`,
+  },
+  documents: {
+    requiredContent: 'content must be a non-empty string',
+    requiredIdentity: 'platform and platformUserId are required',
+    invalidBuffer: 'buffer must be a non-empty Buffer',
+    unreadableContent: (filename) => `Could not extract readable text from "${filename}".`,
+    unsupportedDocument: (extension) => `Unsupported document type "${extension || 'unknown'}".`,
+  },
+  ai: {
+    // Only the provider's short message, with API keys masked: the full body may echo secrets.
+    api: (status, data) => `AI API error ${status}: ${String((data && data.error && data.error.message) || '').replace(/sk-[A-Za-z0-9_-]+/g, 'sk-***').slice(0, 200)}`,
+  },
+};
+
+module.exports = { ERRORS };

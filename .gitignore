@@ -1,6 +1,26 @@
 node_modules/
 .env
 mapping.json
+# Backups (mapping.json.corrupt-*) and temp files written next to mapping.json
+mapping.json.*
+# SQLite store (MAPPING_STORE=sqlite)
+*.db
+*.db-*
 handoff-rc-omnichannel-bridge.md
+# Editor / IDE settings
+.idea/
+.vscode/
 data/
 npm-debug.log*
+debug-dumps/
+before-after.md
+CODEBASE_AUDIT_REPORT.md
+
+PLAN.md
+
+*.tgoffset
+
+floorplan/
+
+# Personal setup notes, kept local
+guide.md
