@@ -123,7 +123,7 @@ or
       `Document "${filename}" was uploaded (${chunks} chunk(s)). You can now ask questions about it.`,
     unsupportedMessage: 'I cannot pass on this kind of content yet. A support agent can see a notice about it in the system.',
     mediaDeliveryFailed: 'Sorry, I could not deliver one of the support files right now. Please try again later.',
-    mediaTooLarge: 'This media file is too large. Please send a file up to 20 MB.',
+    mediaTooLarge: 'This file is too large. Please send a smaller file.',
     mediaUploadFailed: 'Sorry, I could not upload this media right now. Please try again later.',
     mediaUploadStatus: (type, filename, reason) =>
       `[Telegram ${type}] Failed to upload "${filename}" to Rocket.Chat: ${reason}`,

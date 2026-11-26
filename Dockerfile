@@ -17,7 +17,7 @@ COPY src ./src
 COPY scripts/rc-bootstrap.js ./scripts/rc-bootstrap.js
 
 # mapping.json, the Telegram offset and uploaded documents all live in /app/data (a volume).
-RUN mkdir -p /app/data /app/debug-dumps && chown -R node:node /app/data /app/debug-dumps
+RUN mkdir -p /app/data /app/debug-dumps /var/lib/telegram-bot-api && chown -R node:node /app/data /app/debug-dumps
 USER node
 VOLUME ["/app/data"]
 

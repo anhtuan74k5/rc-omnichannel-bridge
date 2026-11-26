@@ -146,8 +146,12 @@ const ENV = Object.freeze({
   telegramMaxDocumentBytes: Number(
     process.env.TELEGRAM_MAX_DOCUMENT_BYTES || DEFAULTS.telegramMaxDocumentBytes
   ),
+  // Folder shared with a self-hosted Bot API server (--local); empty = cloud Bot API.
+  telegramLocalFilesDir: (process.env.TELEGRAM_LOCAL_FILES_DIR || '').trim(),
   telegramMaxMediaBytes: Number(
-    process.env.TELEGRAM_MAX_MEDIA_BYTES || DEFAULTS.telegramMaxMediaBytes
+    process.env.TELEGRAM_MAX_MEDIA_BYTES
+      // The cloud Bot API stops at 20 MB; a local server does not, Rocket.Chat stops at 100 MB.
+      || (process.env.TELEGRAM_LOCAL_FILES_DIR ? DEFAULTS.telegramMaxDocumentBytes : DEFAULTS.telegramMaxMediaBytes)
   ),
   // Render Rocket.Chat Markdown in agent -> Telegram messages; set to 'false' to send raw text.
   telegramRenderMarkdown: process.env.TELEGRAM_RENDER_MARKDOWN !== 'false',
