@@ -2,12 +2,13 @@
  * index.js
  * --------
  * Bridge entry point (`npm start`). The implementation lives in src/:
- * see README.md ("Cấu trúc chính") for the layout.
+ * see README.md ("Project layout").
  *
  * Exposes:
  *  - GET  /webhook/facebook  (Facebook webhook verification)
  *  - POST /webhook/facebook  (Facebook incoming messages)
  *  - POST /webhook/telegram  (Telegram incoming messages)
+ *  - POST /webhook/zalo      (Zalo incoming messages, when ZALO_ENABLED)
  *  - POST /webhook/rocketchat, GET /health, /documents*
  *
  * Also re-exports the pieces the tests use.

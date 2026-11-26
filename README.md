@@ -1,7 +1,8 @@
 # Rocket.Chat Omnichannel Bridge
 
 A Node.js bridge that connects **Telegram** and **Facebook Messenger** to
-**Rocket.Chat Omnichannel** through the Livechat API (`/api/v1/livechat/*`).
+**Rocket.Chat Omnichannel** through the Livechat API (`/api/v1/livechat/*`). A
+**Zalo Official Account** channel is included too, tested against a mock only.
 
 What it does:
 
@@ -11,7 +12,8 @@ What it does:
   Omnichannel webhook (under a second) with polling as a fallback.
 - Carries text, emoji, images, files, video, voice, audio, GIFs and static
   stickers in both directions.
-- Keeps the visitor/room mapping on disk, so conversations continue after a restart.
+- Keeps the visitor/room mapping on disk (JSON file or SQLite), so conversations
+  continue after a restart.
 - Optional AI auto-reply that uses business facts and documents uploaded for each
   customer, and hands the conversation to a human agent when it cannot answer.
 - Runs either with `npm start` next to an existing Rocket.Chat, or as a complete
@@ -27,6 +29,7 @@ What it does:
 - [Telegram: polling or webhook](#telegram-polling-or-webhook)
 - [Facebook Messenger](#facebook-messenger)
 - [Rocket.Chat Omnichannel webhook](#rocketchat-omnichannel-webhook)
+- [Zalo (mock only)](#zalo-mock-only)
 - [Conversations: AI, closing, failures, edits](#conversations-ai-closing-failures-edits)
 - [Text formatting and media](#text-formatting-and-media)
 - [Bridge HTTP API](#bridge-http-api)
@@ -59,7 +62,7 @@ flowchart LR
 
 ## Requirements
 
-- Node.js 20 or newer (CI tests Node 20 and 22; the Docker image uses Node 22).
+- Node.js 22.13 or newer (CI tests Node 22 and 24; the Docker image uses Node 22).
 - A Rocket.Chat server with Omnichannel enabled, plus an agent account or a
   Personal Access Token. Not needed with Docker Compose, which creates both.
 - A Telegram bot token (from BotFather) if you use Telegram.
@@ -109,7 +112,7 @@ flowchart TB
         SETUP["rc-setup<br/>(runs once per up)"]
         DB[("mongodb rs0<br/>volume mongodb_data")]
         NATS[nats]
-        CADDY -- "/webhook/facebook<br/>/webhook/telegram" --> BR
+        CADDY -- "/webhook/facebook, telegram, zalo" --> BR
         CADDY -- "everything else (agent UI)" --> RC
         BR -- "Livechat REST API" --> RC
         RC -- "Omnichannel webhook (internal)" --> BR
@@ -172,7 +175,7 @@ bridge start.
 4. In Meta for Developers → Messenger → Webhooks, set the Callback URL to
    `https://<PUBLIC_DOMAIN>/webhook/facebook`. Keep the same Verify token.
 
-Only the Facebook and Telegram webhooks and the Rocket.Chat UI are public.
+Only the platform webhooks (Facebook, Telegram, Zalo) and the Rocket.Chat UI are public.
 `/health`, `/documents`, `/metrics` and the Rocket.Chat webhook answer `404` from
 outside. Check health on the server with `curl http://127.0.0.1:3001/health`.
 MongoDB and NATS publish no ports, and Rocket.Chat and the bridge listen on
@@ -184,7 +187,7 @@ MongoDB and NATS publish no ports, and Rocket.Chat and the bridge listen on
 |---|---|
 | Update after `git pull` | `docker compose up -d --build` (data stays in the volumes) |
 | Back up Rocket.Chat | `docker compose exec mongodb mongodump --archive > rc-backup.archive` |
-| Back up the bridge | copy the `bridge_data` volume (`mapping.json`, Telegram offset, documents) |
+| Back up the bridge | stop the bridge, then copy the `bridge_data` volume (`mapping.db`, Telegram offset, documents) |
 | Stop | `docker compose down` |
 | Stop and **delete all data** | `docker compose down -v` |
 
@@ -230,15 +233,45 @@ default API limit is 10 calls per minute, so raise it first (Administration → 
 | `TELEGRAM_WEBHOOK_SECRET` | Recommended for webhooks | Secret checked on every webhook request |
 | `TELEGRAM_WEBHOOK_URL` | For the helper | Public URL of `/webhook/telegram` |
 | `TELEGRAM_ALLOWED_CHAT_IDS` | No | Comma-separated chat ids; empty allows every chat |
-| `TELEGRAM_MAX_DOCUMENT_BYTES` | No | Document size limit, default 100 MB |
-| `TELEGRAM_MAX_MEDIA_BYTES` | No | Photo/video/voice size limit, default 20 MB |
+| `TELEGRAM_MAX_DOCUMENT_BYTES` | No | Document size limit, default 100 MB (the cloud Bot API stops at 20 MB) |
+| `TELEGRAM_MAX_MEDIA_BYTES` | No | Photo/video/voice size limit, default 20 MB (100 MB with a local Bot API server) |
+| `TELEGRAM_LOCAL_FILES_DIR` | No | Folder shared with a [local Bot API server](#files-above-20-mb-local-bot-api-server) |
 | `TELEGRAM_MAX_UPDATE_RETRIES` | No | Attempts per update before it is skipped, default `3` |
 | `TELEGRAM_RENDER_MARKDOWN` | No | Default `true`; `false` sends agent messages as plain text |
 
 With polling off and no `TELEGRAM_WEBHOOK_SECRET`, the bridge logs a startup warning
 because webhook requests are not authenticated.
 
-### Facebook Messenger
+#### Files above 20 MB: local Bot API server
+
+The cloud Bot API lets a bot download at most 20 MB. A
+[local Bot API server](https://github.com/tdlib/telegram-bot-api) in `--local` mode
+has no such limit. Rocket.Chat's own upload limit (100 MB by default) then applies,
+and each file is held in memory while it is relayed.
+
+> This path is tested with a stub only. It has not been run against a real server,
+> which needs your own `api_id` and `api_hash`.
+
+1. Create `api_id` and `api_hash` at <https://my.telegram.org>.
+2. Move the bot off the cloud server by calling
+   [`logOut`](https://core.telegram.org/bots/api#logout) once. While logged out you
+   cannot return to the cloud API for 10 minutes.
+3. Add to `.env`:
+
+   ```env
+   TELEGRAM_API_ID=123456
+   TELEGRAM_API_HASH=your-api-hash
+   TELEGRAM_API_BASE_URL=http://telegram-bot-api:8081
+   TELEGRAM_LOCAL_FILES_DIR=/var/lib/telegram-bot-api
+   ```
+
+4. Start with the profile: `docker compose --profile telegram-local up -d --build`.
+
+The Compose service uses the community image `aiogram/telegram-bot-api`. The bridge
+reads the server's files through a shared read-only volume (group 101) and opens
+nothing outside `TELEGRAM_LOCAL_FILES_DIR`.
+
+## Facebook Messenger
 
 | Variable | Required | Description |
 |---|---|---|
@@ -286,7 +319,9 @@ guessing. Documents are matched by keywords, not by meaning.
 | `MAX_OUTBOUND_MEDIA_BYTES` | 50 MB | Largest Rocket.Chat file the bridge downloads to forward |
 | `CONVERSATION_CLOSED_NOTICE` | `true` | Tell the customer when an agent ends the chat |
 | `CONVERSATION_CLOSED_MESSAGE` | see `src/constants/messages.js` | Custom text for that notice |
-| `MAPPING_FILE` | `./mapping.json` | Where the visitor/room mapping is stored |
+| `MAPPING_STORE` | `json` (`sqlite` in Docker Compose) | How the visitor/room mapping is stored |
+| `MAPPING_FILE` | `./mapping.json` | JSON mapping file; also the source of the one-time SQLite import |
+| `MAPPING_DB` | `./mapping.db` | SQLite database, used with `MAPPING_STORE=sqlite` |
 | `LOG_LEVEL` | empty | `debug` also logs routine events (Messenger read receipts, delivery reports, echoes) |
 | `DEBUG_POLLING` | `false` | Log polling requests |
 | `DEBUG_DUMP_PAYLOADS` | `false` | Write selected raw payloads to `debug-dumps/` |
@@ -304,8 +339,8 @@ Meta still limits *data access* to 90 days after a Page admin last used or grant
 app (`dataAccessUntil` in the log). Before that date, regenerate the Page token.
 Telegram bot tokens do not expire.
 
-`FB_GRAPH_BASE_URL` and `TELEGRAM_API_BASE_URL` (optional) change the Graph and Bot
-API origins, so a test bridge can talk to the included mock instead:
+`FB_GRAPH_BASE_URL`, `TELEGRAM_API_BASE_URL` and `ZALO_API_BASE_URL` (optional)
+change the platform API origins, so a test bridge can talk to the included mock instead:
 
 ```bash
 node scripts/e2e/mock-platforms.js 4010
@@ -316,7 +351,8 @@ The mock injects faults through `POST /__fault`, for example
 
 - Facebook: `fb-190`, `fb-551`, `fb-10`, `fb-2018278`, `fb-100`, `fb-rate`.
 - Telegram: `tg-401`, `tg-403`, `tg-400-chat`, `tg-400-parse`.
-- Both: `http-429`, `http-500`, `http-503`, `timeout`.
+- Zalo: `zalo-216`, `zalo-230`, `zalo-213`, `zalo-32`.
+- Any platform: `http-429`, `http-500`, `http-503`, `timeout`.
 - Token checks: `ok-token-expiring`, `ok-data-access-expiring`.
 
 Use the mock only with a test bridge (its own port and `.env`), never with the real one.
@@ -417,6 +453,25 @@ Requests are checked with the `X-RocketChat-Livechat-Token` header and answered 
 `200` at once. Delivery uses the same path as polling (same error handling, notices
 and AI pause). `GET /health` shows the webhook state under `rocketChatWebhook`.
 
+## Zalo (mock only)
+
+The Zalo Official Account channel shows that a third platform fits the same
+pipeline. It follows Zalo's public documentation and is tested against the mock;
+**it has not been verified with a real Official Account**, and it does not refresh
+the access token.
+
+| Variable | Default | Description |
+|---|---|---|
+| `ZALO_ENABLED` | `false` | `true` turns on `POST /webhook/zalo` |
+| `ZALO_APP_ID`, `ZALO_OA_SECRET_KEY` | empty | Verify `X-ZEvent-Signature`; without them every webhook is rejected |
+| `ZALO_ACCESS_TOKEN` | empty | OA access token for sending |
+| `ZALO_API_BASE_URL` | `https://openapi.zalo.me` | API origin |
+| `ZALO_MEDIA_HOSTS` | `.zdn.vn,.zadn.vn,.zaloapp.com` | Hosts attachments may be downloaded from |
+| `ZALO_MAX_MEDIA_BYTES` | 25 MB | Largest inbound attachment |
+
+Customers' text, images, audio, video, files, locations and links reach the room.
+Agents can send text, JPG/PNG/GIF images and PDF/Word files.
+
 ## Conversations: AI, closing, failures, edits
 
 - **AI handoff.** When the AI hands a conversation to an agent, or an agent replies,
@@ -481,7 +536,7 @@ either, so text sent with a file arrives as a separate message right after the f
 
 | Direction | Supported |
 |---|---|
-| Telegram → Rocket.Chat | Photos, documents, video, voice, audio (including MP3), GIF/animation, video notes, static WebP stickers. Contacts, locations and venues are not forwarded: the room gets a note and the customer is told |
+| Telegram → Rocket.Chat | Photos, files of any type, video, voice, audio (including MP3), GIF/animation, video notes, static WebP stickers. Contacts, locations and venues are not forwarded: the room gets a note and the customer is told |
 | Rocket.Chat → Telegram | Photos, GIFs, video, audio/voice, documents |
 | Messenger → Rocket.Chat | Images, video, audio, files, stickers (one image per sticker); locations as a map link |
 | Rocket.Chat → Messenger | Images, GIFs (as images), video, audio/voice, files |
@@ -494,6 +549,9 @@ either, so text sent with a file arrives as a separate message right after the f
   "this file type is not supported" notice instead of "try again later".
 - The Page Access Token travels in the `Authorization` header, never in a URL.
 - Files above the size limits are refused and the customer is told.
+- Agent files are downloaded only from Rocket.Chat upload paths on `ROCKETCHAT_URL`.
+  If Rocket.Chat redirects to external storage, the agent credentials are not sent there.
+  A link card pointing elsewhere is delivered as ordinary text.
 
 ## Bridge HTTP API
 
@@ -503,6 +561,7 @@ either, so text sent with a file arrives as a separate message right after the f
 | `GET` | `/webhook/facebook` | Facebook webhook verification |
 | `POST` | `/webhook/facebook` | Facebook events |
 | `POST` | `/webhook/telegram` | Telegram updates (webhook mode) |
+| `POST` | `/webhook/zalo` | Zalo events (`404` unless `ZALO_ENABLED=true`) |
 | `POST` | `/webhook/rocketchat` | Rocket.Chat Omnichannel events (needs `ROCKETCHAT_WEBHOOK_SECRET`) |
 | `POST` | `/documents/upload` | Upload a document for one customer |
 | `GET` | `/documents` | List a customer's documents |
@@ -526,8 +585,8 @@ curl -X POST "http://localhost:3001/documents/upload" \
 
 Documents are stored per `platform` + `platformUserId`. Supported types: `.txt`,
 `.md`, `.csv`, `.tsv`, `.json`, `.jsonl`, `.html`, `.htm`, `.xml`, `.yaml`, `.yml`,
-`.log`, `.ini`, `.conf`, `.env`, `.pdf` and `.docx`. Customers can also send a
-document in Telegram; it is indexed for the AI automatically.
+`.log`, `.ini`, `.conf`, `.env`, `.pdf` and `.docx`. A file a customer sends in
+Telegram always goes to the agent; with the AI on, readable documents are indexed too.
 
 ## Logging, retries and stored data
 
@@ -543,17 +602,24 @@ document in Telegram; it is indexed for the AI automatically.
   (Messenger adds `queue-wait`).
 - Customer names come from Telegram (`first_name last_name` or `@username`) or the
   Facebook User Profile API. They fall back to `TG <id>` / `FB <psid>`, and are
-  stored in `mapping.json` so they are looked up only once.
-- `mapping.json` is written to a temporary file and then renamed, so a crash never
+  stored in the mapping so they are looked up only once.
+- The JSON store is written to a temporary file and then renamed, so a crash never
   leaves a half-written file. A damaged file is set aside as `mapping.json.corrupt-*`.
+- With `MAPPING_STORE=sqlite` (Node's built-in `node:sqlite`), only the changed
+  customer is written. On first start an existing `mapping.json` is imported once and
+  left untouched, so changes made afterwards exist only in the database.
+- Visitor tokens are random, because a token alone gives access to a visitor's chat
+  history. Older guessable tokens (`visitor_<platform id>`) are replaced, and revoked,
+  on the customer's first message after their room closes.
 - With `DEBUG_DUMP_PAYLOADS=true`, selected raw payloads go to `debug-dumps/`, with
   tokens removed. That folder is never committed.
 
 ## Testing
 
 ```bash
-npm test         # node:test, about 170 tests
+npm test         # node:test
 npm run lint     # ESLint; fails only on errors (current warnings: docs/lint-baseline.md)
+npm run test:e2e # needs Docker: the whole Compose stack against mocked platforms
 ```
 
 The tests cover:
@@ -565,12 +631,21 @@ The tests cover:
 - delivery error classification, the 24-hour window and the `HUMAN_AGENT` retry;
 - the Telegram offset.
 
-Many of them run against `scripts/e2e/mock-platforms.js`. Results of the last full
-run are in [docs/test-results-auto.md](docs/test-results-auto.md).
+Many of them run against `scripts/e2e/mock-platforms.js`.
 
-CI (`.github/workflows/ci.yml`) runs `npm ci`, `npm run lint` and `npm test` on
-Node 20 and 22 for every push and pull request. It uses no secrets. Code style
-follows `.editorconfig`: UTF-8, LF, two-space indent.
+`npm run test:e2e` uses its own project name, ports (3300, 3301, 4310) and random
+secrets, and removes its containers and volumes afterwards (`E2E_KEEP=1` keeps them).
+
+CI/CD (`.github/workflows/ci.yml`):
+
+| Job | Runs on | Does |
+|---|---|---|
+| `test` | every push and pull request | `npm ci`, lint and tests on Node 22 and 24 |
+| `e2e` | after `test` | builds the image and runs `npm run test:e2e` |
+| `publish` | `main` and `v*` tags, after both pass | pushes the image to `ghcr.io/<owner>/rc-omnichannel-bridge` |
+
+The tests use no repository secrets. Deploying to a server is still manual. Code
+style follows `.editorconfig`: UTF-8, LF, two-space indent.
 
 A manual checklist against real Telegram, Messenger and Rocket.Chat is in
 [scripts/smoke.md](scripts/smoke.md). It covers text, emoji, images, PDF, video,
@@ -595,12 +670,16 @@ voice, MP3, GIF, stickers, large files, restarts and network loss.
   Public use needs App Review, and `FB_HUMAN_AGENT_TAG` needs the "Human Agent" permission.
 - Rocket.Chat opens no room while no agent is online, so the customer is told to
   wait instead of being queued.
-- The Telegram Bot API lets bots download files of at most 20 MB, so larger
-  customer files are refused even if `TELEGRAM_MAX_DOCUMENT_BYTES` is higher.
+- The cloud Telegram Bot API lets bots download files of at most 20 MB; larger ones
+  need a local Bot API server (not yet verified against a real one).
 - Animated and video stickers are not converted into animations, Telegram contacts
   and locations are not forwarded, and archives cannot be sent to Messenger.
-- State lives in `mapping.json`, which is enough for one bridge instance but not
-  for several running side by side.
+- Zalo is tested against the mock only.
+- One bridge instance: the mapping and the queues are not shared between processes.
+- An agent message that keeps failing is dropped after 3 attempts, and polling reads
+  only the latest 20 messages of a room.
+- After switching to a new Rocket.Chat, delete the old mapping: saved visitors and
+  rooms do not exist there.
 - The AI finds documents by keywords, not by meaning.
 
 ## Project layout
@@ -615,13 +694,14 @@ src/
   server.js                 start(): startup checks, polling loops, graceful shutdown
   runtime.js                Shared singletons: queues, rate limiter, scheduler, rcWebhook
   auth.js                   authorizeAdmin (ADMIN_API_KEY)
-  routes/                   facebook, telegram, rocketchat, health, documents
+  routes/                   facebook, telegram, zalo, rocketchat, health, documents
   inbound/                  Customer -> Rocket.Chat
     forwardToRocketChat.js    AI auto-reply, rate limit, send to the room
     rocketchatRoom.js         Create or reuse the visitor and room
     mediaPipeline.js          Download -> upload -> notify, shared by both platforms
     telegram.js               Documents, media, unsupported types
-    facebook.js               Attachments and the per-customer queue
+    facebook.js, zalo.js      Attachments
+    queue.js                  Per-customer queue and dedupe behind the webhooks
     pollTelegram.js           Telegram polling loop
   outbound/                 Agent -> customer
     deliverAgentMessages.js   Delivery with retries and dedupe (polling and webhook)
@@ -631,12 +711,13 @@ src/
     telegram.js               Bot API: polling, webhook, text and media
     facebook.js               Graph API: webhook, Send API, HUMAN_AGENT retry
     facebookProfile.js        Customer names from the Graph API
+    zalo.js                   Zalo OA: webhook and sending (mock-tested)
     webhookGuards.js          Turns the Telegram webhook off while polling
   rocketchat/               Rocket.Chat
     rocketchat.js             Livechat API client
     rcWebhook.js              Omnichannel webhook receiver, fallback polling pace
     pollScheduler.js          Fair polling across rooms, urgent rooms first
-  core/                     mapping, keyedQueue, rateLimiter, deliveryErrors,
+  core/                     mapping, mappingStore, keyedQueue, rateLimiter, deliveryErrors,
                             customerNames, metrics, textFormat
   lib/                      httpClient, logger, debugDump
   media/                    Download, classify and convert media
@@ -644,7 +725,8 @@ src/
   knowledge/                ai.js, documents.js, liveLookup.js, prompt.md
 scripts/
   rc-bootstrap.js           rc-setup: prepares a fresh Rocket.Chat
-  e2e/mock-platforms.js     Mock Graph and Telegram APIs with fault injection
+  e2e/mock-platforms.js     Mock Graph, Telegram and Zalo APIs with fault injection
+  e2e/compose-e2e.js        npm run test:e2e
   fb-check.js               npm run fb:check (checks the Facebook settings in .env without printing secrets)
   restart-bridge.ps1        Restart one local bridge instance (Windows)
   smoke.md                  Manual test checklist
@@ -652,5 +734,5 @@ test/                       node:test suites
 docs/                       Test results, lint baseline
 ```
 
-At run time the bridge keeps `mapping.json` (plus `mapping.json.tgoffset`) and
+At run time the bridge keeps `mapping.json` or `mapping.db` (plus `mapping.json.tgoffset`) and
 `data/documents/` in the project root, or in the `bridge_data` volume with Docker.
