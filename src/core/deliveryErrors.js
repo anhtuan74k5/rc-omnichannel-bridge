@@ -52,9 +52,31 @@ function classifyTelegram(error) {
   return { kind: 'transient', reason: 'lỗi mạng khi gọi Telegram' };
 }
 
+// From Zalo's OA documentation; not verified against a real account.
+const ZALO_AUTH_CODES = new Set([-124, -216]);
+const ZALO_RATE_LIMIT_CODES = new Set([-32]);
+
+function classifyZalo(error) {
+  const code = Number(error.code);
+  const status = Number(error.status);
+
+  if (ZALO_AUTH_CODES.has(code)) return { kind: 'auth', reason: 'access token Zalo OA hết hạn hoặc không hợp lệ' };
+  if (code === -230) return { kind: 'permanent', reason: 'khách không tương tác trong 7 ngày, cần khách nhắn trước' };
+  if (code === -213) return { kind: 'permanent', reason: 'khách chưa quan tâm hoặc đã bỏ quan tâm OA' };
+  if (ZALO_RATE_LIMIT_CODES.has(code) || status === 429 || status >= 500) {
+    return { kind: 'transient', reason: 'Zalo tạm thời lỗi hoặc giới hạn tốc độ' };
+  }
+  if (code < 0 || status >= 400) {
+    return { kind: 'permanent', reason: `Zalo từ chối nội dung (mã ${Number.isFinite(code) ? code : status})` };
+  }
+  return { kind: 'transient', reason: 'lỗi mạng khi gọi Zalo' };
+}
+
 function classifyDeliveryError(platform, error) {
   const err = error || {};
-  return platform === 'facebook' ? classifyFacebook(err) : classifyTelegram(err);
+  if (platform === 'facebook') return classifyFacebook(err);
+  if (platform === 'zalo') return classifyZalo(err);
+  return classifyTelegram(err);
 }
 
 module.exports = { classifyDeliveryError };

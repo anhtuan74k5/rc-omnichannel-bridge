@@ -14,6 +14,7 @@ app.use(express.json({ limit: ENV.webhookBodyLimit, verify: keepRawBody }));
 
 app.use(require('./routes/facebook'));
 app.use(require('./routes/telegram'));
+app.use(require('./routes/zalo'));
 app.use(require('./routes/rocketchat'));
 app.use(require('./routes/health'));
 app.use(require('./routes/documents'));

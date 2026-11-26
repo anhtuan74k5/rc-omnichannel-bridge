@@ -2,13 +2,12 @@
  * Incoming Facebook attachments -> Rocket.Chat, and the per-customer task queue.
  */
 
-const mapping = require('../core/mapping');
 const rocketchat = require('../rocketchat/rocketchat');
 const facebook = require('../platforms/facebook');
 const { CHANNELS, ENV } = require('../constants/config');
 const { MESSAGES } = require('../constants/messages');
 const { downloadFacebookAttachment, isFacebookFileTooLarge } = require('../media/facebookFiles');
-const { facebookQueue, facebookInFlight } = require('../runtime');
+const { enqueueInboundTask } = require('./queue');
 const { ensureRocketChatRoom } = require('./rocketchatRoom');
 const { relayMediaToRocketChat } = require('./mediaPipeline');
 
@@ -67,34 +66,8 @@ async function handleFacebookAttachment(psid, attachment) {
   });
 }
 
-/**
- * Queue one Facebook message part. Parts of the same customer run in order;
- * different customers run in parallel. A part already seen (Meta redelivers a
- * webhook it considers unanswered) is dropped, also across restarts.
- */
-function enqueueFacebookTask(psid, dedupeKey, task) {
-  const id = dedupeKey ? `${psid}:${dedupeKey}` : null;
-  if (id) {
-    const entry = mapping.getOrCreate(CHANNELS.facebook, psid);
-    if (facebookInFlight.has(id) || mapping.hasProcessedInbound(entry, dedupeKey)) {
-      console.log('[facebook] Duplicate delivery ignored.');
-      return;
-    }
-    facebookInFlight.add(id);
-  }
-
-  const queuedAt = Date.now();
-  facebookQueue.enqueue(`facebook:${psid}`, async () => {
-    try {
-      console.log(`[timing] facebook:${psid} queue-wait=${Date.now() - queuedAt}ms`);
-      await task();
-    } finally {
-      if (id) {
-        facebookInFlight.delete(id);
-        mapping.markInboundProcessed(mapping.getOrCreate(CHANNELS.facebook, psid), dedupeKey);
-      }
-    }
-  });
-}
+/** Queue one Facebook message part (see inbound/queue.js). */
+const enqueueFacebookTask = (psid, dedupeKey, task) =>
+  enqueueInboundTask(CHANNELS.facebook, psid, dedupeKey, task);
 
 module.exports = { handleFacebookAttachment, enqueueFacebookTask };

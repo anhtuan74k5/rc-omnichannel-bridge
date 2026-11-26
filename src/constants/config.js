@@ -1,6 +1,7 @@
 const CHANNELS = Object.freeze({
   facebook: 'facebook',
   telegram: 'telegram',
+  zalo: 'zalo',
 });
 
 const DEFAULTS = Object.freeze({
@@ -14,6 +15,9 @@ const DEFAULTS = Object.freeze({
   telegramMaxMediaBytes: 20 * 1024 * 1024,
   // Messenger Send API accepts attachments up to 25 MB.
   facebookMaxMediaBytes: 25 * 1024 * 1024,
+  zaloMaxMediaBytes: 25 * 1024 * 1024,
+  zaloApiBaseUrl: 'https://openapi.zalo.me',
+  zaloMediaHosts: '.zdn.vn,.zadn.vn,.zaloapp.com',
   aiBaseUrl: 'https://api.openai.com/v1',
   aiModel: 'gpt-4o-mini',
   aiResumeAfterMinutes: 30,
@@ -126,6 +130,17 @@ const ENV = Object.freeze({
   facebookMaxMediaBytes: Number(
     process.env.FB_MAX_MEDIA_BYTES || DEFAULTS.facebookMaxMediaBytes
   ),
+  // Zalo Official Account (mock-tested only, see platforms/zalo.js).
+  zaloEnabled: process.env.ZALO_ENABLED === 'true',
+  zaloAppId: process.env.ZALO_APP_ID || '',
+  zaloOaSecretKey: process.env.ZALO_OA_SECRET_KEY || '',
+  zaloAccessToken: process.env.ZALO_ACCESS_TOKEN || '',
+  zaloApiBaseUrl: trimUrl(process.env.ZALO_API_BASE_URL, DEFAULTS.zaloApiBaseUrl),
+  zaloMediaHosts: (process.env.ZALO_MEDIA_HOSTS || DEFAULTS.zaloMediaHosts)
+    .split(',')
+    .map((value) => value.trim().replace(/\/+$/, '').toLowerCase())
+    .filter(Boolean),
+  zaloMaxMediaBytes: Number(process.env.ZALO_MAX_MEDIA_BYTES || DEFAULTS.zaloMaxMediaBytes),
   debugPolling: process.env.DEBUG_POLLING === 'true',
   debugDumpPayloads: process.env.DEBUG_DUMP_PAYLOADS === 'true',
   telegramMaxDocumentBytes: Number(

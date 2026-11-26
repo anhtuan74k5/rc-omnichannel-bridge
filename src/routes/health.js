@@ -19,6 +19,7 @@ router.get('/health', (req, res) => {
     credentialsRejectedAt: {
       facebook: m.facebookAuthRejectedAt || null,
       telegram: m.telegramAuthRejectedAt || null,
+      zalo: m.zaloAuthRejectedAt || null,
     },
     facebookTokenConfigured: Boolean(ENV.facebookPageAccessToken),
     rocketChatWebhook: rcWebhook.status(),

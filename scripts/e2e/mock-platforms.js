@@ -1,20 +1,22 @@
 /**
- * Mock of the Facebook Graph API and Telegram Bot API with fault injection.
+ * Mock of the Facebook Graph API, Telegram Bot API and Zalo OA API with fault injection.
  *
  *   node scripts/e2e/mock-platforms.js [port]       (default 4010)
  *   FB_GRAPH_BASE_URL=http://127.0.0.1:4010  TELEGRAM_API_BASE_URL=http://127.0.0.1:4010
  *
  * Both platforms share one port: Graph paths start with /v<N>.<N>/, Telegram
- * paths with /bot<token>/. Nothing is sent to real services.
+ * paths with /bot<token>/, Zalo paths with /v2.0/oa/ or /v3.0/oa/ (media under
+ * /zalo-media/). Nothing is sent to real services.
  *
  * Faults (queue per platform; count=0 means sticky until cleared):
- *   POST /__fault  {"platform":"facebook|telegram","fault":"<name>","count":1}
+ *   POST /__fault  {"platform":"facebook|telegram|zalo","fault":"<name>","count":1}
  *   DELETE /__fault           clears all faults
  *   GET  /__requests          requests received so far (no tokens, no bodies)
  * Fault names: fb-190, fb-551, fb-10, fb-2018278, fb-100, fb-rate (code 4),
  *   http-429, http-500, http-503, tg-401, tg-403, tg-400-chat, tg-400-parse,
  *   timeout (never answers), ok-token-expiring (debug_token expires in 1 h),
- *   ok-data-access-expiring (data access window ends in 1 h).
+ *   ok-data-access-expiring (data access window ends in 1 h), zalo-216 (bad
+ *   token), zalo-230 (7-day window), zalo-213 (not a follower), zalo-32 (rate).
  */
 
 const http = require('http');
@@ -37,11 +39,15 @@ const FAULTS = {
   'tg-403': () => [403, { ok: false, error_code: 403, description: 'Forbidden: bot was blocked by the user' }],
   'tg-400-chat': () => [400, { ok: false, error_code: 400, description: 'Bad Request: chat not found' }],
   'tg-400-parse': () => [400, { ok: false, error_code: 400, description: "Bad Request: can't parse entities" }],
+  'zalo-216': () => [200, { error: -216, message: 'Access token is invalid' }],
+  'zalo-230': () => [200, { error: -230, message: 'User has not interacted in the last 7 days' }],
+  'zalo-213': () => [200, { error: -213, message: 'User has not followed the OA' }],
+  'zalo-32': () => [200, { error: -32, message: 'Rate limit exceeded' }],
 };
 const SPECIAL = ['timeout', 'ok-token-expiring', 'ok-data-access-expiring'];
 
 function createMock() {
-  const queues = { facebook: [], telegram: [] };
+  const queues = { facebook: [], telegram: [], zalo: [] };
   const requests = [];
   const updates = []; // returned (once) by the next getUpdates call
   let sequence = 1000;
@@ -77,6 +83,7 @@ function createMock() {
       if (req.method === 'DELETE') {
         queues.facebook.length = 0;
         queues.telegram.length = 0;
+        queues.zalo.length = 0;
         return reply(res, 200, { ok: true });
       }
       const spec = JSON.parse(body.toString() || '{}');
@@ -90,10 +97,15 @@ function createMock() {
 
     const telegram = path.match(/^\/(?:file\/)?bot[^/]+\/(\w+)/);
     const graph = path.match(/^\/v\d+\.\d+\/(.+)$/);
-    const platform = telegram ? 'telegram' : graph ? 'facebook' : null;
+    if (path.startsWith('/zalo-media/')) {
+      res.writeHead(200, { 'content-type': 'image/png' });
+      return res.end(Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'));
+    }
+    const zalo = path.match(/^\/v[23]\.0\/(oa\/.+)$/);
+    const platform = telegram ? 'telegram' : zalo ? 'zalo' : graph ? 'facebook' : null;
     if (!platform) return reply(res, 404, { error: 'not found' });
 
-    const route = telegram ? telegram[1] : graph[1];
+    const route = telegram ? telegram[1] : zalo ? zalo[1] : graph[1];
     const contentType = req.headers['content-type'] || '';
     requests.push({
       platform, method: req.method, route, bytes: body.length, contentType,
@@ -106,6 +118,15 @@ function createMock() {
     if (fault && FAULTS[fault]) {
       const [status, payload] = FAULTS[fault](platform);
       return reply(res, status, payload);
+    }
+
+    if (platform === 'zalo') {
+      if (!req.headers.access_token) return reply(res, 200, { error: -216, message: 'Access token is invalid' });
+      sequence += 1;
+      const data = route.startsWith('oa/upload/')
+        ? { attachment_id: `att_${sequence}`, token: `file_${sequence}` }
+        : { message_id: `zalo_mock_${sequence}` };
+      return reply(res, 200, { error: 0, message: 'Success', data });
     }
 
     if (platform === 'facebook') {
@@ -148,6 +169,7 @@ function createMock() {
     clear: () => {
       queues.facebook.length = 0;
       queues.telegram.length = 0;
+      queues.zalo.length = 0;
       requests.length = 0;
     },
   };
@@ -158,6 +180,6 @@ module.exports = { createMock, FAULTS };
 if (require.main === module) {
   const port = Number(process.argv[2] || 4010);
   createMock().listen(port).then((actual) => {
-    console.log(`[mock] Graph + Telegram mock listening on http://127.0.0.1:${actual}`);
+    console.log(`[mock] Graph + Telegram + Zalo mock listening on http://127.0.0.1:${actual}`);
   });
 }

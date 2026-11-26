@@ -15,7 +15,7 @@ setInterval(() => rateLimiter.sweep(), 5 * 60000).unref();
 
 const pollScheduler = createPollScheduler({ hotWindowMs: ENV.rocketChatHotWindowMs });
 const facebookQueue = createKeyedQueue({
-  onError: (err, key) => console.error(`[facebook] Background task failed for ${key}:`, err.message),
+  onError: (err, key) => console.error(`[inbound] Background task failed for ${key}:`, err.message),
 });
 const facebookInFlight = new Set();
 // Agent messages reach the customer through one queue per customer, whether they

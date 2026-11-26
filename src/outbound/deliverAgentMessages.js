@@ -6,6 +6,7 @@ const mapping = require('../core/mapping');
 const rocketchat = require('../rocketchat/rocketchat');
 const facebook = require('../platforms/facebook');
 const telegram = require('../platforms/telegram');
+const zalo = require('../platforms/zalo');
 const { ENV } = require('../constants/config');
 const { MESSAGES } = require('../constants/messages');
 const { dumpRocketChatMessage } = require('../lib/debugDump');
@@ -18,6 +19,7 @@ const { alertCredentialsRejected, notifyDeliveryFailure } = require('./deliveryN
 
 const messageRetryCounts = new Map();
 const MAX_PROCESSED_MESSAGE_IDS = 200;
+const MEDIA_PLATFORMS = new Set(['telegram', 'facebook', 'zalo']);
 const completedAttachmentKeys = new Map();
 
 function markMessageProcessed(entry, messageId, timestamp) {
@@ -64,7 +66,7 @@ function deliverAgentMessages(entry, messages, closed = Boolean(messages.closed)
       const completed = completedAttachmentKeys.get(retryKey) || new Set();
       const pendingAttachments = attachments.filter((attachment) => !completed.has(attachment.source));
 
-      if ((entry.platform === 'telegram' || entry.platform === 'facebook')
+      if (MEDIA_PLATFORMS.has(entry.platform)
         && attachments.length > 0 && text !== 'connected') {
         let attachmentFailed = false;
         for (const attachment of pendingAttachments) {
@@ -134,6 +136,8 @@ function deliverAgentMessages(entry, messages, closed = Boolean(messages.closed)
         } else if (entry.platform === 'telegram') {
           // Agent text only: render Rocket.Chat Markdown (bold/italic/strike/code).
           await telegram.sendMessage(entry.platformUserId, text, { markdown: true });
+        } else if (entry.platform === 'zalo') {
+          await zalo.sendAgentMessage(entry.platformUserId, text, { timeZone: ENV.timezone });
         }
         messageRetryCounts.delete(retryKey);
         markMessageProcessed(entry, messageId, ts);

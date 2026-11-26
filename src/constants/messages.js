@@ -10,7 +10,7 @@ const MESSAGES = {
     conversationClosed:
       'Cuộc trò chuyện đã kết thúc. Nếu cần hỗ trợ thêm, bạn cứ nhắn tin lại nhé!',
     unsupportedFileType: (platform) =>
-      `${platform === 'facebook' ? 'Messenger' : 'Nền tảng này'} không hỗ trợ gửi loại file này (ví dụ file nén .zip). Vui lòng gửi dạng ảnh, PDF, video, âm thanh hoặc đường dẫn.`,
+      `${{ facebook: 'Messenger', zalo: 'Zalo' }[platform] || 'Nền tảng này'} không hỗ trợ gửi loại file này (ví dụ file nén .zip). Vui lòng gửi dạng ảnh, PDF, video, âm thanh hoặc đường dẫn.`,
     aiReplyForRoom: (reply) => `🤖 AI: ${reply}`,
     aiHandoffForRoom: (message) => `🤖 AI: ${message}`,
     liveLookupContext: (context) =>
@@ -127,6 +127,16 @@ or
     mediaUploadFailed: 'Sorry, I could not upload this media right now. Please try again later.',
     mediaUploadStatus: (type, filename, reason) =>
       `[Telegram ${type}] Failed to upload "${filename}" to Rocket.Chat: ${reason}`,
+  },
+  zalo: {
+    mediaTooLarge: 'This file is too large. Please send a file up to 25 MB.',
+    mediaUploadFailed: 'Sorry, I could not upload this file right now. Please try again later.',
+    mediaDeliveryFailed: 'Sorry, I could not deliver one of the support files right now. Please try again later.',
+    mediaUploadStatus: (type, filename, reason) =>
+      `[Zalo ${type}] Failed to upload "${filename}" to Rocket.Chat: ${reason}`,
+    locationRoomMessage: (url) => `📍 [Zalo] Khách chia sẻ vị trí: ${url}`,
+    linkRoomMessage: (url) => `🔗 [Zalo] Khách gửi liên kết: ${url}`,
+    unsupportedRoomMessage: (type) => `[Zalo ${type}] Khách gửi nội dung bridge chưa chuyển được.`,
   },
   facebook: {
     mediaTooLarge: 'This file is too large. Please send a file up to 25 MB.',

@@ -99,6 +99,7 @@ function isFacebookFileTooLarge(error) {
 
 module.exports = {
   downloadFacebookAttachment,
+  filenameFromUrl,
   sniffExtension,
   isAllowedFacebookMediaUrl,
   isFacebookFileTooLarge,

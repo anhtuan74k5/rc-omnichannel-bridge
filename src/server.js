@@ -64,6 +64,12 @@ async function start() {
     }
     console.log(`[startup] Facebook webhook:  http://localhost:${PORT}/webhook/facebook`);
     console.log(`[startup] Telegram webhook:  http://localhost:${PORT}/webhook/telegram`);
+    if (ENV.zaloEnabled) {
+      console.log(`[startup] Zalo webhook:      http://localhost:${PORT}/webhook/zalo (mock-tested only)`);
+      if (!ENV.zaloAppId || !ENV.zaloOaSecretKey) {
+        console.warn('[startup] ZALO_APP_ID / ZALO_OA_SECRET_KEY missing; every Zalo webhook will be rejected.');
+      }
+    }
     console.log(`[startup] Rocket.Chat webhook: ${rcWebhook.isEnabled() ? `http://localhost:${PORT}/webhook/rocketchat` : 'disabled (ROCKETCHAT_WEBHOOK_SECRET not set)'}`);
     // Informational only: failures are logged, never fatal.
     facebook.checkToken().catch(() => {});

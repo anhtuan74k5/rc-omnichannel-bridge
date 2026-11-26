@@ -16,6 +16,15 @@ const ERRORS = {
     mediaTooLarge: (maxBytes) => `FACEBOOK_MEDIA_TOO_LARGE: file exceeds ${maxBytes} bytes`,
     mediaDownloadFailed: (status) => `Facebook media download failed (${status})`,
   },
+  zalo: {
+    sendFailed: (status, data) => `Zalo send failed (${status}): ${JSON.stringify(data)}`,
+    tokenMissing: 'ZALO_ACCESS_TOKEN is missing',
+    mediaInvalidBuffer: 'media buffer must be a non-empty Buffer',
+    mediaUnsupported: 'ZALO_MEDIA_UNSUPPORTED: only JPG, PNG, GIF, PDF and Word files can be sent',
+    mediaUrlRejected: 'ZALO_MEDIA_URL_REJECTED: attachment URL is not an allowed Zalo host',
+    mediaTooLarge: (maxBytes) => `ZALO_MEDIA_TOO_LARGE: file exceeds ${maxBytes} bytes`,
+    mediaDownloadFailed: (status) => `Zalo media download failed (${status})`,
+  },
   rocketchat: {
     api: (status, text) => `Rocket.Chat API error ${status}: ${text}`,
     loginFailed: (status, body) => `Login failed (${status}): ${JSON.stringify(body)}`,
