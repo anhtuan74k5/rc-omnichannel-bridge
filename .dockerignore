@@ -6,6 +6,8 @@ node_modules
 npm-debug.log*
 mapping.json
 mapping.json.*
+*.db
+*.db-*
 *.tgoffset
 data
 debug-dumps

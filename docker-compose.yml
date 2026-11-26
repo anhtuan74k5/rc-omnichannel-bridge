@@ -104,6 +104,8 @@ services:
       ROCKETCHAT_URL: http://rocketchat:3000
       PORT: 3001
       MAPPING_FILE: /app/data/mapping.json
+      # One row per customer in the data volume; an existing mapping.json is imported once.
+      MAPPING_STORE: ${MAPPING_STORE:-sqlite}
       # The bridge never needs the admin account; blank what env_file brings in.
       RC_ADMIN_PASSWORD: ""
       RC_ADMIN_USERNAME: ""

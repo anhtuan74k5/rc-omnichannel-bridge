@@ -1,84 +1,60 @@
 /**
  * mapping.js
  * ----------
- * Simple JSON-file-backed store that persists the mapping between a platform
- * user (Facebook PSID or Telegram chat_id) and a Rocket.Chat visitor token /
- * room id / platform. Data survives server restarts.
+ * Maps a platform user (Facebook PSID, Telegram chat_id, ...) to a Rocket.Chat
+ * visitor token and room. Entries are held in memory and persisted by a store
+ * (core/mappingStore.js): a JSON file by default, or SQLite.
  *
- * mapping.json structure:
- * {
- *   "entries": [
- *     {
- *       "platform": "facebook" | "telegram",
- *       "platformUserId": "<PSID or chat_id>",
- *       "visitorToken": "<rocketchat visitor token>",
- *       "roomId": "<rocketchat room id>",
- *       "lastMessageTimestamp": 0,
- *       "active": true
- *     }
- *   ]
- * }
+ * An entry:
+ *   { "platform": "telegram", "platformUserId": "<id>", "visitorToken": "<token>",
+ *     "roomId": "<room id>", "lastMessageTimestamp": 0, "active": true }
  */
 
-const fs = require('fs');
 const path = require('path');
+const { createJsonStore, createSqliteStore } = require('./mappingStore');
 
 // MAPPING_FILE lets tests (or a second deployment) use a different store.
 const MAPPING_FILE = process.env.MAPPING_FILE || path.join(__dirname, '..', '..', 'mapping.json');
 const MAX_INBOUND_IDS = 100;
 
-let store = { entries: [] };
+let entries = [];
+let store = null;
 
-function load() {
-  try {
-    if (fs.existsSync(MAPPING_FILE)) {
-      const raw = fs.readFileSync(MAPPING_FILE, 'utf8');
-      store = JSON.parse(raw);
-      if (!Array.isArray(store.entries)) store.entries = [];
-      store.entries.forEach((entry) => {
-        if (!Array.isArray(entry.processedMessageIds)) entry.processedMessageIds = [];
-        if (!Array.isArray(entry.processedInboundIds)) entry.processedInboundIds = [];
-      });
-      console.log(`[mapping] Loaded ${store.entries.length} mapping entries from ${MAPPING_FILE}`);
-    } else {
-      store = { entries: [] };
-      save();
-    }
-  } catch (err) {
-    console.error('[mapping] Failed to load mapping file, starting fresh:', err.message);
-    // Keep the unreadable file: the next save would otherwise overwrite it for good.
-    try {
-      const backup = `${MAPPING_FILE}.corrupt-${Date.now()}`;
-      fs.renameSync(MAPPING_FILE, backup);
-      console.error(`[mapping] ALERT: the unreadable mapping file was kept as ${path.basename(backup)}; restore it by hand if needed.`);
-    } catch (backupErr) {
-      console.error('[mapping] Could not keep a copy of the unreadable mapping file:', backupErr.message);
-    }
-    store = { entries: [] };
+function openStore() {
+  const kind = String(process.env.MAPPING_STORE || 'json').trim().toLowerCase();
+  if (kind === 'json') return createJsonStore(MAPPING_FILE);
+  if (kind === 'sqlite') {
+    const database = process.env.MAPPING_DB || `${MAPPING_FILE.replace(/\.json$/i, '')}.db`;
+    return createSqliteStore(database, MAPPING_FILE);
   }
+  // A typo must not silently start an empty store next to the real one.
+  throw new Error(`MAPPING_STORE must be "json" or "sqlite", not "${kind}"`);
 }
 
-function save() {
-  const tempFile = `${MAPPING_FILE}.${process.pid}.tmp`;
-  try {
-    fs.writeFileSync(tempFile, JSON.stringify(store, null, 2), 'utf8');
-    fs.renameSync(tempFile, MAPPING_FILE);
-  } catch (err) {
-    try {
-      if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
-    } catch (cleanupErr) {
-      console.error('[mapping] Failed to clean up temporary mapping file:', cleanupErr.message);
-    }
-    console.error('[mapping] Failed to save mapping file:', err.message);
-    throw err;
-  }
+function activeStore() {
+  if (!store) store = openStore();
+  return store;
+}
+
+function load() {
+  entries = activeStore().load();
+  entries.forEach((entry) => {
+    if (!Array.isArray(entry.processedMessageIds)) entry.processedMessageIds = [];
+    if (!Array.isArray(entry.processedInboundIds)) entry.processedInboundIds = [];
+  });
+  console.log(`[mapping] Loaded ${entries.length} mapping entries from ${activeStore().location}`);
+}
+
+/** Persist `changed`, or everything when called without it. */
+function save(changed) {
+  activeStore().save(entries, changed);
 }
 
 /**
  * Find an entry by platform + platformUserId.
  */
 function findByPlatformUser(platform, platformUserId) {
-  return store.entries.find(
+  return entries.find(
     (e) => e.platform === platform && e.platformUserId === String(platformUserId)
   );
 }
@@ -87,14 +63,14 @@ function findByPlatformUser(platform, platformUserId) {
  * Find an entry by visitor token.
  */
 function findByVisitorToken(visitorToken) {
-  return store.entries.find((e) => e.visitorToken === visitorToken);
+  return entries.find((e) => e.visitorToken === visitorToken);
 }
 
 /**
  * Find an entry by room id.
  */
 function findByRoomId(roomId) {
-  return store.entries.find((e) => e.roomId === roomId);
+  return entries.find((e) => e.roomId === roomId);
 }
 
 /**
@@ -114,8 +90,8 @@ function getOrCreate(platform, platformUserId) {
     processedInboundIds: [],
     active: true,
   };
-  store.entries.push(entry);
-  save();
+  entries.push(entry);
+  save(entry);
   console.log(`[mapping] Created new mapping entry for ${platform}:${platformUserId}`);
   return entry;
 }
@@ -125,7 +101,7 @@ function getOrCreate(platform, platformUserId) {
  */
 function update(entry, fields) {
   Object.assign(entry, fields);
-  save();
+  save(entry);
 }
 
 /**
@@ -146,7 +122,7 @@ function markInboundProcessed(entry, key) {
  * Return all active entries (used by the polling loop).
  */
 function getActiveEntries() {
-  return store.entries.filter((e) => e.active && e.roomId && e.visitorToken);
+  return entries.filter((e) => e.active && e.roomId && e.visitorToken);
 }
 
 module.exports = {

@@ -3,6 +3,9 @@ node_modules/
 mapping.json
 # Backups (mapping.json.corrupt-*) and temp files written next to mapping.json
 mapping.json.*
+# SQLite store (MAPPING_STORE=sqlite)
+*.db
+*.db-*
 handoff-rc-omnichannel-bridge.md
 # Editor / IDE settings
 .idea/
