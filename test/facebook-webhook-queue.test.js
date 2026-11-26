@@ -12,6 +12,11 @@ process.env.MAPPING_FILE = mappingFile;
 process.env.AI_ENABLED = 'false';
 process.env.FB_APP_SECRET = 'queue-test-secret';
 process.env.FB_PAGE_ACCESS_TOKEN = 'queue-test-token';
+// The customer-name lookup must not reach the real Graph API.
+process.env.FB_GRAPH_BASE_URL = 'http://127.0.0.1:9';
+// A file left by an earlier run with the same PID would mark these messages as already seen.
+fs.rmSync(mappingFile, { force: true });
+test.after(() => fs.rmSync(mappingFile, { force: true }));
 
 const mapping = require('../src/core/mapping');
 const rocketchat = require('../src/rocketchat/rocketchat');

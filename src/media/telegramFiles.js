@@ -33,6 +33,8 @@ async function readLocalFile(filePath, maxBytes) {
     buffer = await fs.readFile(file);
   } catch (error) {
     if (error.code === TELEGRAM_FILE_TOO_LARGE || error.message === ERRORS.telegram.localFileOutside) throw error;
+    // No `cause`: the original error quotes a path that contains the bot token.
+    // eslint-disable-next-line preserve-caught-error
     throw new Error(ERRORS.telegram.localFileUnreadable(error.code));
   }
   return { buffer, filePath: path.basename(filePath), size: buffer.length };
