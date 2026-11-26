@@ -2,8 +2,6 @@ const ERRORS = {
   telegram: {
     tokenMissing: 'TELEGRAM_BOT_TOKEN is missing',
     updateFailed: (status, data) => `Telegram getUpdates failed (${status}): ${JSON.stringify(data)}`,
-    unsupportedDocument: (extension, extensions) =>
-      `Unsupported document type "${extension || 'unknown'}". Please upload one of: ${extensions.join(', ')}.`,
     documentTooLarge: (maxBytes) => `Document is too large. Max size is ${maxBytes} bytes.`,
     fileInfoFailed: (status, data) => `Telegram getFile failed (${status}): ${JSON.stringify(data)}`,
     fileDownloadFailed: (status) => `Telegram file download failed (${status})`,
@@ -26,6 +24,7 @@ const ERRORS = {
     messageFailed: (body) => `Failed to send message: ${JSON.stringify(body)}`,
     uploadInvalidBuffer: 'buffer must be a non-empty Buffer',
     uploadFailed: (status, text) => `Rocket.Chat livechat upload failed (${status}): ${text}`,
+    fileUrlRejected: 'ROCKETCHAT_FILE_URL_REJECTED: not a file on the configured Rocket.Chat',
     fileUnauthorized: 'ROCKETCHAT_FILE_UNAUTHORIZED: Rocket.Chat file download was unauthorized',
     fileForbidden: 'ROCKETCHAT_FILE_FORBIDDEN: Rocket.Chat file download was forbidden',
     fileNotFound: 'ROCKETCHAT_FILE_NOT_FOUND: Rocket.Chat file was not found',

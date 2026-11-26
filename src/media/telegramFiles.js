@@ -21,6 +21,10 @@ async function downloadTelegramFile(fileId, { maxBytes = ENV.telegramMaxMediaByt
   const fileInfoUrl = `${API.telegram.baseUrl}/bot${ENV.telegramBotToken}/getFile?file_id=${encodeURIComponent(fileId)}`;
   const fileInfoRes = await fetchWithTimeout(fileInfoUrl, {}, { retries: 2 });
   const fileInfo = await fileInfoRes.json();
+  // The cloud Bot API refuses files above its own download limit (20 MB).
+  if (/file is too big/i.test(String(fileInfo && fileInfo.description))) {
+    throw createError(ERRORS.telegram.documentTooLarge(maxBytes), TELEGRAM_FILE_TOO_LARGE);
+  }
   if (!fileInfoRes.ok || !fileInfo.ok || !fileInfo.result || !fileInfo.result.file_path) {
     throw new Error(ERRORS.telegram.fileInfoFailed(fileInfoRes.status, fileInfo));
   }

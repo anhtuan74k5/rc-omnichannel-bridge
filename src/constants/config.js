@@ -81,26 +81,6 @@ const FILES = Object.freeze({
   defaultUpload: 'document',
 });
 
-const DOCUMENT_EXTENSIONS = Object.freeze([
-  '.txt',
-  '.md',
-  '.csv',
-  '.tsv',
-  '.json',
-  '.jsonl',
-  '.html',
-  '.htm',
-  '.xml',
-  '.yaml',
-  '.yml',
-  '.log',
-  '.ini',
-  '.conf',
-  '.env',
-  '.pdf',
-  '.docx',
-]);
-
 const TELEGRAM_MESSAGE_TYPES = Object.freeze([
   'photo',
   'sticker',
@@ -221,7 +201,6 @@ module.exports = {
   API,
   CHANNELS,
   DEFAULTS,
-  DOCUMENT_EXTENSIONS,
   ENV,
   FILES,
   HEADERS,

@@ -5,77 +5,65 @@
 const rocketchat = require('../rocketchat/rocketchat');
 const telegram = require('../platforms/telegram');
 const documents = require('../knowledge/documents');
-const { CHANNELS, ENV } = require('../constants/config');
+const ai = require('../knowledge/ai');
+const { CHANNELS, ENV, FILES, MIME_TYPES } = require('../constants/config');
 const { MESSAGES } = require('../constants/messages');
 const { downloadTelegramFile, isTelegramFileTooLarge } = require('../media/telegramFiles');
 const { ensureRocketChatRoom } = require('./rocketchatRoom');
 const { forwardToRocketChat } = require('./forwardToRocketChat');
 const { relayMediaToRocketChat } = require('./mediaPipeline');
 
-function formatBytes(bytes) {
-  const value = Number(bytes || 0);
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-async function handleTelegramDocument(chatId, document, caption) {
+/** Lets the AI answer questions about a readable document. Never blocks delivery. */
+async function indexDocumentForAi(chatId, file) {
+  if (!ai.isEnabled()) return;
+  let result;
   try {
-    const downloaded = await telegram.downloadDocument(document);
-    const result = await documents.uploadDocumentBuffer({
+    result = await documents.uploadDocumentBuffer({
       platform: CHANNELS.telegram,
       platformUserId: chatId,
-      filename: downloaded.filename,
-      buffer: downloaded.buffer,
+      filename: file.filename,
+      buffer: file.buffer,
     });
-
-    try {
-      const { visitorToken, roomId } = await ensureRocketChatRoom(CHANNELS.telegram, chatId, `TG ${chatId}`);
-      const description = MESSAGES.bridge.telegramDocumentDescription(
-        chatId,
-        result.document.chunks
-      );
-      await rocketchat.uploadLivechatFile(visitorToken, roomId, {
-        filename: downloaded.filename,
-        buffer: downloaded.buffer,
-        mimeType: downloaded.mimeType,
-        description,
-      });
-    } catch (syncErr) {
-      console.error(`[rocketchat] Failed to upload Telegram document to room for ${chatId}:`, syncErr.message);
-      try {
-        const { visitorToken, roomId } = await ensureRocketChatRoom('telegram', chatId, `TG ${chatId}`);
-        await rocketchat.sendMessageToRocketChat(
-          visitorToken,
-          roomId,
-          MESSAGES.telegram.uploadedDocumentStatus(
-            downloaded.filename,
-            downloaded.mimeType,
-            formatBytes(downloaded.size),
-            result.document.chunks
-          )
-        );
-      } catch (messageErr) {
-        console.error(`[rocketchat] Failed to log Telegram document upload for ${chatId}:`, messageErr.message);
-      }
-    }
-
-    await telegram.sendMessage(
-      chatId,
-      MESSAGES.telegram.documentUploaded(result.filename, result.document.chunks)
-    );
-
-    if (caption && caption.trim()) {
-      await forwardToRocketChat(CHANNELS.telegram, chatId, `TG ${chatId}`, caption.trim());
-    }
   } catch (err) {
-    console.error(`[telegram] Failed to handle document from chat ${chatId}:`, err.message);
-    try {
-      await telegram.sendMessage(chatId, MESSAGES.telegram.documentUploadFailed);
-    } catch (sendErr) {
-      console.error(`[telegram] Failed to send document error to chat ${chatId}:`, sendErr.message);
-    }
+    console.warn(`[documents] File from chat ${chatId} was delivered but not indexed: ${err.message}`);
+    return;
   }
+  try {
+    await telegram.sendMessage(chatId, MESSAGES.telegram.documentUploaded(result.filename, result.document.chunks));
+  } catch (err) {
+    console.error(`[telegram] Failed to confirm the document to chat ${chatId}:`, err.message);
+  }
+}
+
+/** A file of any type goes to the agent; indexing it for the AI is extra. */
+async function handleTelegramDocument(chatId, document, caption) {
+  const filename = document.file_name || FILES.defaultDocument;
+  let file = null;
+  await relayMediaToRocketChat({
+    platform: CHANNELS.telegram,
+    userId: chatId,
+    roomName: `TG ${chatId}`,
+    type: 'document',
+    origin: `from chat ${chatId}`,
+    filename,
+    download: async () => {
+      const downloaded = await downloadTelegramFile(document.file_id, {
+        maxBytes: ENV.telegramMaxDocumentBytes,
+      });
+      file = { buffer: downloaded.buffer, filename, mimeType: document.mime_type || MIME_TYPES.octetStream };
+      return file;
+    },
+    isTooLarge: isTelegramFileTooLarge,
+    sendNotice: (text) => telegram.sendMessage(chatId, text),
+    notices: { tooLarge: MESSAGES.telegram.mediaTooLarge, failed: MESSAGES.telegram.mediaUploadFailed },
+    statusMessage: (name, reason) => MESSAGES.telegram.mediaUploadStatus('document', name, reason),
+    afterUpload: async () => {
+      await indexDocumentForAi(chatId, file);
+      if (caption && caption.trim()) {
+        await forwardToRocketChat(CHANNELS.telegram, chatId, `TG ${chatId}`, caption.trim());
+      }
+    },
+  });
 }
 
 async function handleUnsupportedTelegramMessage(chatId, messageType, caption) {

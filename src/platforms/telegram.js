@@ -13,7 +13,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { rememberTelegramName } = require('../core/customerNames');
-const { API, DOCUMENT_EXTENSIONS, ENV, FILES, HEADERS, MIME_TYPES, TELEGRAM_MESSAGE_TYPES } = require('../constants/config');
+const { API, ENV, FILES, HEADERS, MIME_TYPES, TELEGRAM_MESSAGE_TYPES } = require('../constants/config');
 const { ERRORS } = require('../constants/errors');
 const { dumpTelegramUpdate } = require('../lib/debugDump');
 const { fetchWithTimeout } = require('../lib/httpClient');
@@ -63,11 +63,6 @@ function rememberProcessedUpdate(updateId) {
   while (processedUpdateIds.size > MAX_PROCESSED_UPDATE_IDS) {
     processedUpdateIds.delete(processedUpdateIds.values().next().value);
   }
-}
-
-function getExtension(filename) {
-  const match = String(filename || '').toLowerCase().match(/\.[^.]+$/);
-  return match ? match[0] : '';
 }
 
 function getMessageType(message) {
@@ -194,47 +189,6 @@ async function pollUpdates(onMessage, onDocument, onUnsupportedMessage, onMedia)
       break;
     }
   }
-}
-
-async function downloadDocument(document) {
-  if (!ENV.telegramBotToken) {
-    throw new Error(ERRORS.telegram.tokenMissing);
-  }
-
-  const filename = document.file_name || FILES.defaultDocument;
-  const extension = getExtension(filename);
-  if (!DOCUMENT_EXTENSIONS.includes(extension)) {
-    throw new Error(ERRORS.telegram.unsupportedDocument(extension, DOCUMENT_EXTENSIONS));
-  }
-
-  if (document.file_size && document.file_size > ENV.telegramMaxDocumentBytes) {
-    throw new Error(ERRORS.telegram.documentTooLarge(ENV.telegramMaxDocumentBytes));
-  }
-
-  const fileInfoUrl = `${API.telegram.baseUrl}/bot${ENV.telegramBotToken}/getFile?file_id=${encodeURIComponent(document.file_id)}`;
-  const fileInfoRes = await fetchWithTimeout(fileInfoUrl, {}, { retries: 2 });
-  const fileInfo = await fileInfoRes.json();
-  if (!fileInfoRes.ok || !fileInfo.ok || !fileInfo.result || !fileInfo.result.file_path) {
-    throw new Error(ERRORS.telegram.fileInfoFailed(fileInfoRes.status, fileInfo));
-  }
-
-  const downloadUrl = `${API.telegram.fileBaseUrl}/bot${ENV.telegramBotToken}/${fileInfo.result.file_path}`;
-  const downloadRes = await fetchWithTimeout(downloadUrl, {}, { timeoutMs: ENV.httpUploadTimeoutMs, retries: 2 });
-  if (!downloadRes.ok) {
-    throw new Error(ERRORS.telegram.fileDownloadFailed(downloadRes.status));
-  }
-
-  const buffer = Buffer.from(await downloadRes.arrayBuffer());
-  if (buffer.length > ENV.telegramMaxDocumentBytes) {
-    throw new Error(ERRORS.telegram.documentTooLarge(ENV.telegramMaxDocumentBytes));
-  }
-
-  return {
-    filename,
-    buffer,
-    mimeType: document.mime_type || 'application/octet-stream',
-    size: buffer.length,
-  };
 }
 
 function telegramApiError(status, data) {
@@ -443,7 +397,6 @@ async function checkToken() {
 
 module.exports = {
   checkToken,
-  downloadDocument,
   handleWebhook,
   pollUpdates,
   sendAnimation,

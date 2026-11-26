@@ -10,6 +10,7 @@
  * The livechat visitor endpoints accept these headers.
  */
 
+const crypto = require('crypto');
 const mapping = require('../core/mapping');
 const { API, ENV, FILES, HEADERS, MIME_TYPES } = require('../constants/config');
 const { ERRORS } = require('../constants/errors');
@@ -17,6 +18,7 @@ const { dumpRocketChatMessage } = require('../lib/debugDump');
 const { fetchWithTimeout } = require('../lib/httpClient');
 const { log } = require('../lib/logger');
 const { classifyMime } = require('../media/mime');
+const { rocketChatFilePath } = require('../media/rocketchatFileUrl');
 
 const ROCKETCHAT_URL = ENV.rocketchatUrl.replace(/\/+$/, '');
 
@@ -129,45 +131,58 @@ async function loginAgent() {
   return agentSession;
 }
 
+/** Older versions derived the token from the platform id, so anyone could guess it. */
+const isGuessableToken = (token, platformUserId) => token === `visitor_${platformUserId}`;
+const randomId = () => crypto.randomBytes(24).toString('hex');
+
+async function registerVisitor(visitor) {
+  const body = await rcFetch(API.rocketChat.visitorPath, {
+    method: 'POST',
+    body: JSON.stringify({ visitor }),
+  });
+  if (!body || !body.success) {
+    throw new Error(ERRORS.rocketchat.visitorFailed(body));
+  }
+}
+
 /**
- * getOrCreateVisitor(platformUserId, name, department)
- * ----------------------------------------------------
- * Maps a platform user id (PSID or chat_id) to a fixed visitor token.
- * The token is generated deterministically from the platform user id so it
- * stays stable across restarts. If the visitor was never created on
- * Rocket.Chat, POST /api/v1/livechat/visitor is called.
+ * getOrCreateVisitor(platformUserId, name, { platform, department })
+ * ------------------------------------------------------------------
+ * Returns the customer's visitor token, registering the visitor on Rocket.Chat
+ * (POST /api/v1/livechat/visitor) the first time. The token is all that protects
+ * a visitor's chat history in the Livechat API, so it is random and kept in the
+ * mapping store; the caller saves the returned value.
+ *
+ * A guessable token from an older version is replaced once no room is open.
+ * Rocket.Chat matches a visitor by e-mail, so registering the new token with the
+ * old e-mail revokes the old token; the second call then replaces that e-mail,
+ * which was guessable too.
  */
-async function getOrCreateVisitor(platformUserId, name, department) {
-  const key = String(platformUserId);
-  return withMutex(visitorMutexes, key, async () => {
-    // Deterministic token derived from the platform user id.
-    const visitorToken = `visitor_${platformUserId}`;
-
-    // Check if we already created this visitor on Rocket.Chat.
-    const existing = mapping.findByVisitorToken(visitorToken);
-    if (existing && existing.visitorToken) {
-      log.info('[rocketchat] Visitor already exists', { visitorToken });
-      return visitorToken;
+async function getOrCreateVisitor(platformUserId, name, { platform, department } = {}) {
+  const id = String(platformUserId);
+  return withMutex(visitorMutexes, `${platform}:${id}`, async () => {
+    const entry = mapping.findByPlatformUser(platform, id);
+    const current = entry && entry.visitorToken;
+    const replace = Boolean(current) && isGuessableToken(current, id) && !entry.roomId;
+    if (current && !replace) {
+      log.info('[rocketchat] Visitor already exists', { visitorToken: current });
+      return current;
     }
 
-    log.info('[rocketchat] Creating visitor', { platformUserId, nameLength: String(name || '').length });
-    const body = await rcFetch(API.rocketChat.visitorPath, {
-      method: 'POST',
-      body: JSON.stringify({
-        visitor: {
-          token: visitorToken,
-          name: name || `Visitor ${platformUserId}`,
-          email: `${platformUserId}@bridge.local`,
-          department: department || ENV.departmentId || undefined,
-        },
-      }),
-    });
+    // The "visitor_" prefix lets the logger mask the token.
+    const visitorToken = `visitor_${randomId()}`;
+    const visitor = {
+      token: visitorToken,
+      name: name || `Visitor ${id}`,
+      email: `${randomId()}@bridge.local`,
+      department: department || ENV.departmentId || undefined,
+    };
 
-    if (!body || !body.success) {
-      throw new Error(ERRORS.rocketchat.visitorFailed(body));
-    }
+    log.info('[rocketchat] Creating visitor', { platformUserId: id, nameLength: String(name || '').length });
+    if (replace) await registerVisitor({ ...visitor, email: `${id}@bridge.local` });
+    await registerVisitor(visitor);
 
-    log.info('[rocketchat] Visitor created', { visitorToken });
+    log.info(replace ? '[rocketchat] Replaced a guessable visitor token' : '[rocketchat] Visitor created', { visitorToken });
     return visitorToken;
   });
 }
@@ -396,7 +411,8 @@ function extractAttachments(message) {
       };
     })
     .filter(({ identities, descriptor }) => {
-      if (!descriptor.source || identities.some((identity) => seen.has(identity))) return false;
+      // Link cards and quotes point elsewhere: their text is an ordinary message.
+      if (!rocketChatFilePath(descriptor.source) || identities.some((identity) => seen.has(identity))) return false;
       identities.forEach((identity) => seen.add(identity));
       return true;
     })

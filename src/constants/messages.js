@@ -1,7 +1,5 @@
 const MESSAGES = {
   bridge: {
-    telegramDocumentDescription: (chatId, chunks) =>
-      `Telegram document from TG ${chatId}. Indexed for AI with ${chunks} chunk(s).`,
     telegramUnsupportedCaption: (caption) =>
       caption && caption.trim() ? ` Caption: "${caption.trim()}"` : '',
     telegramUnsupportedRoomMessage: (messageType, captionText) =>
@@ -123,10 +121,7 @@ or
   telegram: {
     documentUploaded: (filename, chunks) =>
       `Document "${filename}" was uploaded (${chunks} chunk(s)). You can now ask questions about it.`,
-    documentUploadFailed: "Sorry, I couldn't process your document right now. Please try again later.",
-    unsupportedMessage: 'I received your content, but the bot currently reads only text messages and PDF/DOCX/text documents. A support agent can view this notice in the system.',
-    uploadedDocumentStatus: (filename, mimeType, size, chunks) =>
-      `📎 Telegram uploaded document: ${filename} (${mimeType}, ${size}). Indexed for AI with ${chunks} chunk(s), but the Rocket.Chat file upload did not complete.`,
+    unsupportedMessage: 'I cannot pass on this kind of content yet. A support agent can see a notice about it in the system.',
     mediaDeliveryFailed: 'Sorry, I could not deliver one of the support files right now. Please try again later.',
     mediaTooLarge: 'This media file is too large. Please send a file up to 20 MB.',
     mediaUploadFailed: 'Sorry, I could not upload this media right now. Please try again later.',
